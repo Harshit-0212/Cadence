@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { getSocket } from '@/services/socket';
+import { fetchApi } from '@/services/api';
 import { useAuth } from '@/store/AuthContext';
 
 export interface AppNotification {
@@ -28,6 +29,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       setNotifications([]);
       return;
     }
+
+    // Load persisted notifications from backend
+    fetchApi('/features/notifications')
+      .then((res: any) => {
+        const items = res?.data ?? res;
+        if (Array.isArray(items)) {
+          setNotifications(items);
+        }
+      })
+      .catch(() => {});
 
     const socket = getSocket();
     if (!socket) return;
@@ -60,20 +71,28 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     const onGroupRemoved = ({ groupName }: { groupName: string }) => push(`You were removed from ${groupName}.`);
 
+    const onBadgeUnlocked = ({ badge }: { badge: { name: string; xpReward: number } }) =>
+      push(`🏆 Unlocked Achievement: "${badge.name}"! +${badge.xpReward} XP`);
+
     socket.on('invitation:new', onInvitationNew);
     socket.on('invitation:responded', onInvitationResponded);
     socket.on('group:updated', onGroupUpdated);
     socket.on('group:removed', onGroupRemoved);
+    socket.on('badge:unlocked', onBadgeUnlocked);
 
     return () => {
       socket.off('invitation:new', onInvitationNew);
       socket.off('invitation:responded', onInvitationResponded);
       socket.off('group:updated', onGroupUpdated);
       socket.off('group:removed', onGroupRemoved);
+      socket.off('badge:unlocked', onBadgeUnlocked);
     };
   }, [user]);
 
-  const markAllRead = () => setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  const markAllRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    fetchApi('/features/notifications/mark-read', { method: 'POST' }).catch(() => {});
+  };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 

@@ -33,13 +33,16 @@ export const activityStore = {
     await col.createIndex({ userId: 1, dateKey: 1 });
     await col.createIndex({ userId: 1, eventKey: 1 }, { unique: true, sparse: true });
     await col.createIndex({ userId: 1, type: 1 });
+    // Cleanup any legacy tutor events so they never count toward streak, points, or heatmap
+    await col.deleteMany({ type: 'tutor' as any }).catch(() => {});
   },
 
   /**
    * Records an activity event idempotently.
    * Points table:
    * session: 3, mock_test: 4, interview: 4, flashcard: 1, mistake_retry: 1,
-   * tutor: 1 (max 3/day), focus: 1 (per 25 min), document: 1, app_open: 1, coding_submission: 3
+   * focus: 1 (per 25 min), document: 1, app_open: 1, coding_submission: 3
+   * (Tutor is explicitly zero points / not recorded in activity).
    */
   async recordActivity(
     userId: string,
@@ -49,20 +52,13 @@ export const activityStore = {
     meta?: Record<string, unknown>,
     eventKey?: string,
   ): Promise<boolean> {
+    // Tutor has no activity points or streak contribution
+    if (type === 'tutor') {
+      return false;
+    }
+
     const db = await getDb();
     const col = db.collection<ActivityEventDoc>(COLLECTION);
-
-    // Tutor cap: max 3/day
-    if (type === 'tutor') {
-      const tutorEventsCount = await col.countDocuments({
-        userId,
-        dateKey,
-        type: 'tutor',
-      });
-      if (tutorEventsCount >= 3) {
-        return false;
-      }
-    }
 
     // App open: max 1/day
     if (type === 'app_open') {
@@ -91,10 +87,21 @@ export const activityStore = {
       } else {
         await col.insertOne(doc);
       }
+      // Evaluate badge unlocks server-side after each genuine activity event
+      this.evaluateBadgesTrigger(userId).catch(() => {});
       return true;
     } catch {
       // Duplicate eventKey handled gracefully
       return false;
+    }
+  },
+
+  async evaluateBadgesTrigger(userId: string): Promise<void> {
+    try {
+      const { badgesStore } = await import('./achievements.js');
+      await badgesStore.evaluateBadgesForUser(userId);
+    } catch {
+      // Safe fallback
     }
   },
 
@@ -106,7 +113,7 @@ export const activityStore = {
     const db = await getDb();
     const col = db.collection<ActivityEventDoc>(COLLECTION);
 
-    const distinctDays: string[] = await col.distinct('dateKey', { userId });
+    const distinctDays: string[] = await col.distinct('dateKey', { userId, type: { $ne: 'tutor' } });
     distinctDays.sort(); // Ascending
 
     if (distinctDays.length === 0) {
@@ -195,7 +202,7 @@ export const activityStore = {
 
     const { currentStreak, longestStreak } = await this.computeStreak(userId, userToday);
 
-    const query: Record<string, unknown> = { userId };
+    const query: Record<string, unknown> = { userId, type: { $ne: 'tutor' } };
     if (typeFilter && typeFilter !== 'all') {
       if (typeFilter === 'focus' || typeFilter === 'focus_minutes') {
         query.type = { $in: ['focus', 'focus_minutes'] };

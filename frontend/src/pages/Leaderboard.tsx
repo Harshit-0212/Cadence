@@ -19,6 +19,7 @@ interface LeaderboardEntry {
   xp: number;
   level: number;
   streak: number;
+  badges?: string[];
   isUser: boolean;
 }
 
@@ -95,7 +96,12 @@ export function Leaderboard() {
                     <h3 className="font-space font-bold text-base text-[var(--text-primary)]">
                       {l.name}
                     </h3>
-                    <p className="text-xs text-[var(--text-muted)]">Level {l.level} Scholar</p>
+                    {l.badges && l.badges.length > 0 && (
+                      <div className="mt-1 flex items-center justify-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
+                        <Award size={12} /> {l.badges.length} {l.badges.length === 1 ? 'badge' : 'badges'}
+                      </div>
+                    )}
+                    <p className="text-xs text-[var(--text-muted)] mt-1">Level {l.level} Scholar</p>
                     <div className="mt-4 flex items-center justify-center gap-4 text-xs font-semibold">
                       <span className="text-[#6542C5] dark:text-[#B59AF7]">{l.xp} XP</span>
                       <span className="text-amber-500 flex items-center gap-1">
@@ -126,8 +132,14 @@ export function Leaderboard() {
                           {l.rank}
                         </span>
                         <div>
-                          <p className="text-xs font-bold text-[var(--text-primary)] flex items-center gap-1.5">
-                            {l.name} {l.isUser && <Badge tone="primary">You</Badge>}
+                          <p className="text-xs font-bold text-[var(--text-primary)] flex items-center flex-wrap gap-1.5">
+                            {l.name}
+                            {l.isUser && <Badge tone="primary">You</Badge>}
+                            {l.badges && l.badges.length > 0 && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
+                                <Award size={10} /> {l.badges.length} {l.badges.length === 1 ? 'badge' : 'badges'}
+                              </span>
+                            )}
                           </p>
                           <p className="text-[11px] text-[var(--text-muted)]">Level {l.level}</p>
                         </div>

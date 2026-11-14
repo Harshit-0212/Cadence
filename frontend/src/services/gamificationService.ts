@@ -27,25 +27,50 @@ export interface UserGamificationData {
   }[];
 }
 
+export interface BadgeItem {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  category: 'assessments' | 'streak' | 'study' | 'coding' | 'interviews' | 'community';
+  threshold: number;
+  xpReward: number;
+  rarity: 'common' | 'rare' | 'epic' | 'legendary';
+  howToEarn: string;
+  unlocked: boolean;
+  unlockedAt?: string;
+  progress: number;
+}
+
+export interface LeaderboardUser {
+  rank: number;
+  userId: string;
+  name: string;
+  avatar?: string;
+  xp: number;
+  level: number;
+  streak: number;
+  badges?: string[];
+  isUser: boolean;
+}
+
 export const gamificationService = {
   async getProfile(): Promise<UserGamificationData> {
-    return fetchApi('/gamification/profile');
+    const res = await fetchApi('/gamification/profile');
+    return (res as any)?.data ?? res;
   },
 
-  async getLeaderboard(): Promise<Array<{
-    rank: number;
-    userId: string;
-    name: string;
-    avatar?: string;
-    xp: number;
-    level: number;
-    streak: number;
-    isUser: boolean;
-  }>> {
-    return fetchApi('/gamification/leaderboard');
+  async getLeaderboard(): Promise<LeaderboardUser[]> {
+    const res = await fetchApi('/gamification/leaderboard');
+    return (res as any)?.data ?? res;
   },
 
-  async recordEvent(action: 'coding_accepted' | 'comprehension_drill' | 'quiz_completed' | 'curriculum_step' | 'tutor_session'): Promise<{
+  async getBadges(): Promise<BadgeItem[]> {
+    const res = await fetchApi('/gamification/badges');
+    return (res as any)?.data ?? res;
+  },
+
+  async recordEvent(action: 'coding_accepted' | 'comprehension_drill' | 'quiz_completed' | 'curriculum_step'): Promise<{
     profile: UserGamificationData;
     xpAwarded: number;
     streakIncreased: boolean;
@@ -53,9 +78,10 @@ export const gamificationService = {
     newBadges: string[];
   }> {
     const localDate = new Date().toISOString().slice(0, 10);
-    return fetchApi('/gamification/events', {
+    const res = await fetchApi('/gamification/events', {
       method: 'POST',
       body: JSON.stringify({ action, localDate }),
     });
+    return (res as any)?.data ?? res;
   },
 };

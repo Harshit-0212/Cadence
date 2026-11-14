@@ -12,6 +12,11 @@ import { activityStore } from '../lib/activityStore.js';
 import { computeProgressForUser } from '../lib/progressCompute.js';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { emitToUser } from '../lib/socket.js';
+import { getDb } from '../lib/db.js';
+import { generateStageTest, evaluateStudentAnswer, type PlannerTestAttempt } from '../lib/plannerTests.js';
+import { badgesStore } from '../lib/achievements.js';
+import { resolveEffectiveTimezone, getDateKeyForTimezone } from '../lib/timezone.js';
+import { userStore } from '../lib/users.js';
 
 export const studyPlanRouter = Router();
 
@@ -123,12 +128,294 @@ studyPlanRouter.get('/current', requireAuth, async (req: AuthedRequest, res) => 
   res.json({ data: { plan: plan ?? null, sessions } });
 });
 
+// START STAGE VERIFICATION TEST
+studyPlanRouter.post('/sessions/:id/test/start', requireAuth, async (req: AuthedRequest, res) => {
+  const session = await sessionStore.findById(req.params.id);
+  if (!session || session.userId !== req.userId) {
+    res.status(404).json({ error: { message: 'Session not found.' } });
+    return;
+  }
+
+  const db = await getDb();
+
+  // Enforce progression: previous day must be passed/completed before taking this test
+  if (session.day > 1) {
+    const prevSession = await db.collection<StoredStudySession>('study_sessions').findOne({
+      planId: session.planId,
+      day: session.day - 1,
+    });
+    if (prevSession && prevSession.status !== 'completed') {
+      res.status(403).json({ error: { message: `Please complete and pass Day ${session.day - 1} before attempting Day ${session.day}.` } });
+      return;
+    }
+  }
+
+  // Cooldown enforcement: 2 minutes cooldown after a failed attempt
+  const recentAttempt = await db
+    .collection<PlannerTestAttempt>('planner_test_attempts')
+    .find({ userId: req.userId!, sessionId: session.id })
+    .sort({ createdAt: -1 })
+    .limit(1)
+    .toArray();
+
+  if (recentAttempt.length > 0 && recentAttempt[0].status === 'failed') {
+    const elapsedMs = Date.now() - new Date(recentAttempt[0].createdAt).getTime();
+    const cooldownMs = 120 * 1000; // 2 minutes cooldown
+    if (elapsedMs < cooldownMs) {
+      const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
+      res.status(429).json({
+        error: {
+          message: `Cooldown active. Please review your mistakes and wait ${remainingSec}s before retrying.`,
+          secondsRemaining: remainingSec,
+        },
+      });
+      return;
+    }
+  }
+
+  const { weakTopics } = await computeProgressForUser(req.userId!);
+  const attemptsCount = (session as any).attemptsCount || 0;
+
+  try {
+    const questions = await generateStageTest({
+      topic: session.topic,
+      subject: session.subject,
+      objective: session.objective,
+      difficulty: session.difficulty,
+      weakTopics,
+      attemptNumber: attemptsCount + 1,
+    });
+
+    const attemptId = `stage_att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const attemptDoc: PlannerTestAttempt = {
+      id: attemptId,
+      userId: req.userId!,
+      sessionId: session.id,
+      planId: session.planId,
+      day: session.day,
+      attemptNumber: attemptsCount + 1,
+      questions,
+      status: 'in-progress',
+      createdAt: new Date().toISOString(),
+    };
+
+    await db.collection('planner_test_attempts').insertOne(attemptDoc);
+
+    // Strip answers and explanations before sending to student
+    const studentQuestions = questions.map((q) => ({
+      id: q.id,
+      type: q.type,
+      prompt: q.prompt,
+      options: q.options,
+      topic: q.topic,
+      isCoding: q.isCoding,
+      language: q.language,
+      starterCode: q.starterCode,
+      reviewMode: q.reviewMode,
+      testCases: q.testCases?.map((tc) => ({ input: tc.input, expected: tc.expected, description: tc.description })),
+    }));
+
+    res.json({
+      data: {
+        attemptId,
+        sessionId: session.id,
+        day: session.day,
+        topic: session.topic,
+        subject: session.subject,
+        passMark: 90,
+        questions: studentQuestions,
+        attemptsCount,
+        bestScore: (session as any).bestScore || 0,
+      },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to start test';
+    res.status(500).json({ error: { message } });
+  }
+});
+
+// SUBMIT STAGE VERIFICATION TEST
+studyPlanRouter.post('/sessions/:id/test/submit', requireAuth, async (req: AuthedRequest, res) => {
+  const { attemptId, answers, codeResults, timezone, localDate } = req.body || {};
+  if (!attemptId || typeof attemptId !== 'string') {
+    res.status(400).json({ error: { message: 'attemptId is required.' } });
+    return;
+  }
+
+  const session = await sessionStore.findById(req.params.id);
+  if (!session || session.userId !== req.userId) {
+    res.status(404).json({ error: { message: 'Session not found.' } });
+    return;
+  }
+
+  const db = await getDb();
+  const attempt = await db.collection<PlannerTestAttempt>('planner_test_attempts').findOne({
+    id: attemptId,
+    userId: req.userId!,
+    sessionId: session.id,
+  });
+
+  if (!attempt) {
+    res.status(404).json({ error: { message: 'Attempt record not found.' } });
+    return;
+  }
+
+  const userAnswers: Record<string, string> = typeof answers === 'object' && answers ? answers : {};
+  const codeResMap: Record<string, { passed: boolean }> = typeof codeResults === 'object' && codeResults ? codeResults : {};
+
+  let earned = 0;
+  const mistakes: Array<{
+    questionId: string;
+    prompt: string;
+    studentAnswer: string;
+    correctAnswer: string;
+    explanation: string;
+  }> = [];
+
+  for (const q of attempt.questions) {
+    const studentAns = userAnswers[q.id] || '';
+    const codeRes = codeResMap[q.id];
+    const evaluation = evaluateStudentAnswer(q, studentAns, codeRes);
+
+    if (evaluation.isCorrect) {
+      earned += 1;
+    } else {
+      mistakes.push({
+        questionId: q.id,
+        prompt: q.prompt,
+        studentAnswer: evaluation.studentAnswer,
+        correctAnswer: q.correctAnswer,
+        explanation: q.explanation,
+      });
+    }
+  }
+
+  const total = attempt.questions.length || 1;
+  const scorePercent = Math.round((earned / total) * 100);
+  const passed = scorePercent >= 90;
+
+  // Resolve user timezone & dateKey
+  const user = await userStore.findById(req.userId!);
+  const tzResolution = resolveEffectiveTimezone(timezone, user?.timezone);
+  const effectiveTz = tzResolution.timezone || 'Asia/Kolkata';
+  const dateKey =
+    typeof localDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(localDate)
+      ? localDate
+      : getDateKeyForTimezone(new Date(), effectiveTz);
+
+  // Update attempt record
+  await db.collection('planner_test_attempts').updateOne(
+    { id: attemptId },
+    {
+      $set: {
+        status: passed ? 'passed' : 'failed',
+        scorePercent,
+        passed,
+        mistakes,
+        completedAt: new Date().toISOString(),
+      },
+    }
+  );
+
+  const prevAttempts = (session as any).attemptsCount || 0;
+  const newAttemptsCount = prevAttempts + 1;
+  const prevBest = (session as any).bestScore || 0;
+  const newBestScore = Math.max(prevBest, scorePercent);
+
+  let updatedSession: StoredStudySession | undefined;
+  let updatedPlan = await planStore.findById(session.planId);
+
+  if (passed) {
+    // 1. Mark current session completed
+    updatedSession = await sessionStore.update(session.id, {
+      status: 'completed',
+      conceptsDone: session.conceptsTotal,
+      completedAt: new Date().toISOString(),
+      attemptsCount: newAttemptsCount,
+      bestScore: newBestScore,
+      lastTestStatus: 'passed',
+      lastAttemptAt: new Date().toISOString(),
+    } as any);
+
+    // 2. Unlock the very next session in this plan
+    const nextSession = await db.collection<StoredStudySession>('study_sessions').findOne({
+      planId: session.planId,
+      day: session.day + 1,
+    });
+    if (nextSession && nextSession.status === 'locked') {
+      await sessionStore.update(nextSession.id, { status: 'upcoming' });
+    }
+
+    // 3. Recompute plan completion
+    const allSessions = await sessionStore.listByPlan(session.planId);
+    updatedPlan = await planStore.update(session.planId, { completionPercent: recomputeCompletion(allSessions) });
+
+    // 4. Record genuine activity event (3 points for passed session)
+    await activityStore.recordActivity(
+      req.userId!,
+      'session',
+      dateKey,
+      3,
+      {
+        title: `Passed Day ${session.day} Test: ${session.topic} (${scorePercent}%)`,
+        sessionId: session.id,
+        planId: session.planId,
+        scorePercent,
+      },
+      `session:${session.id}`
+    );
+
+    // 5. Evaluate badge achievements (e.g. first_planner_stage_passed, score_90_plus)
+    await badgesStore.evaluateBadgesForUser(req.userId!);
+
+    emitToUser(req.userId!, 'stats:invalidate', { reason: 'session_test_passed', sessionId: session.id });
+  } else {
+    // Failed attempt: save attempt count and best score, session remains in-progress
+    updatedSession = await sessionStore.update(session.id, {
+      attemptsCount: newAttemptsCount,
+      bestScore: newBestScore,
+      lastTestStatus: 'failed',
+      lastAttemptAt: new Date().toISOString(),
+    } as any);
+  }
+
+  res.json({
+    data: {
+      passed,
+      scorePercent,
+      passMark: 90,
+      mistakes,
+      attemptsCount: newAttemptsCount,
+      bestScore: newBestScore,
+      nextUnlocked: passed,
+      session: updatedSession,
+      plan: updatedPlan,
+    },
+  });
+});
+
+// SERVER-ENFORCED COMPLETION: Refuses completion unless a passed attempt exists
 studyPlanRouter.post('/sessions/:id/complete', requireAuth, async (req: AuthedRequest, res) => {
   const session = await sessionStore.findById(req.params.id);
   if (!session || session.userId !== req.userId) {
     res.status(404).json({ error: { message: 'Session not found.' } });
     return;
   }
+
+  const db = await getDb();
+  const passedAttempt = await db.collection('planner_test_attempts').findOne({
+    userId: req.userId!,
+    sessionId: session.id,
+    passed: true,
+  });
+
+  if (!passedAttempt) {
+    res.status(403).json({
+      error: { message: 'Verification required: You must pass the day test with at least 90% before marking this day complete.' },
+    });
+    return;
+  }
+
   const updated = await sessionStore.update(session.id, {
     status: 'completed',
     conceptsDone: session.conceptsTotal,

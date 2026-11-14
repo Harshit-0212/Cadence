@@ -1,7 +1,12 @@
 import { executeCodeSync } from '../lib/codeExecution.js';
 import type { Response } from 'express';
 import type { AuthedRequest } from '../middleware/auth.js';
-import { codingProblemStore, newSubmissionId, type StoredCodingSubmission } from '../lib/codingStore.js';
+import {
+  codingProblemStore,
+  codingSubmissionsCollection,
+  newSubmissionId,
+  type StoredCodingSubmission,
+} from '../lib/codingStore.js';
 import { studentProgressStore, journeyStore } from '../lib/journeyStore.js';
 import { activityStore } from '../lib/activityStore.js';
 import { emitToUser } from '../lib/socket.js';
@@ -45,10 +50,35 @@ export const studentCodingController = {
       skip: parsedSkip,
     });
 
+    const userId = req.userId;
+    const problemIds = problems.map((p) => p._id);
+    const submissionsCol = await codingSubmissionsCollection();
+    const userSubs = userId
+      ? await submissionsCol.find({ userId, problemId: { $in: problemIds } }).toArray()
+      : [];
+
+    const statusMap = new Map<string, { status: 'solved' | 'submitted' | 'not_attempted'; lastSubmittedAt?: string }>();
+    for (const sub of userSubs) {
+      const existing = statusMap.get(sub.problemId);
+      const isAccepted = sub.verdict === 'accepted';
+      if (!existing) {
+        statusMap.set(sub.problemId, {
+          status: isAccepted ? 'solved' : 'submitted',
+          lastSubmittedAt: sub.createdAt,
+        });
+      } else {
+        if (isAccepted) existing.status = 'solved';
+        if (new Date(sub.createdAt) > new Date(existing.lastSubmittedAt || 0)) {
+          existing.lastSubmittedAt = sub.createdAt;
+        }
+      }
+    }
+
     // Strip any sensitive internal fields, return PublicCodingProblemListItem DTO
     const items: PublicCodingProblemListItem[] = await Promise.all(
       problems.map(async (p) => {
         const counts = await codingProblemStore.countTestCases(p._id);
+        const userStatus = statusMap.get(p._id) || { status: 'not_attempted' as const };
         return {
           id: p._id,
           slug: p.slug,
@@ -59,6 +89,8 @@ export const studentCodingController = {
           supportedLanguages: p.supportedLanguages,
           executionLimits: p.executionLimits,
           sampleCount: counts.sample,
+          status: userStatus.status,
+          lastSubmittedAt: userStatus.lastSubmittedAt,
           createdAt: p.createdAt,
           updatedAt: p.updatedAt,
         };
@@ -127,6 +159,22 @@ export const studentCodingController = {
       order: tc.order,
     }));
 
+    const userId = req.userId;
+    let userStatus: { status: 'solved' | 'submitted' | 'not_attempted'; lastSubmittedAt?: string } = {
+      status: 'not_attempted',
+    };
+    if (userId) {
+      const submissionsCol = await codingSubmissionsCollection();
+      const latest = await submissionsCol.findOne({ userId, problemId: problem._id }, { sort: { createdAt: -1 } });
+      if (latest) {
+        const hasAccepted = latest.verdict === 'accepted' || (await submissionsCol.countDocuments({ userId, problemId: problem._id, verdict: 'accepted' })) > 0;
+        userStatus = {
+          status: hasAccepted ? 'solved' : 'submitted',
+          lastSubmittedAt: latest.createdAt,
+        };
+      }
+    }
+
     // Construct clean PublicCodingProblemDetail DTO
     const detail: PublicCodingProblemDetail = {
       id: problem._id,
@@ -149,6 +197,8 @@ export const studentCodingController = {
         caseSensitive: problem.checkerPolicy.caseSensitive,
       },
       sampleCases,
+      status: userStatus.status,
+      lastSubmittedAt: userStatus.lastSubmittedAt,
       createdAt: problem.createdAt,
       updatedAt: problem.updatedAt,
     };

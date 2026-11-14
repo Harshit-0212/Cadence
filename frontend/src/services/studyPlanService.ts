@@ -76,4 +76,63 @@ export const studyPlanService = {
     const plan = await this.getPlan();
     return { evaluation: data.evaluation, plan };
   },
+
+  async startStageTest(sessionId: string): Promise<{
+    attemptId: string;
+    sessionId: string;
+    day: number;
+    topic: string;
+    subject: string;
+    passMark: number;
+    questions: Array<{
+      id: string;
+      type: 'mcq' | 'true-false' | 'short-answer' | 'coding';
+      prompt: string;
+      options?: string[];
+      topic: string;
+      isCoding?: boolean;
+      language?: string;
+      starterCode?: string;
+      reviewMode?: 'worker' | 'ai_review';
+      testCases?: Array<{ input: string; expected: string; description?: string }>;
+    }>;
+    attemptsCount: number;
+    bestScore: number;
+  }> {
+    const res = await fetchApi(`/studyplan/sessions/${sessionId}/test/start`, { method: 'POST' });
+    return (res as any)?.data ?? res;
+  },
+
+  async submitStageTest(
+    sessionId: string,
+    payload: {
+      attemptId: string;
+      answers: Record<string, string>;
+      codeResults?: Record<string, { passed: boolean }>;
+      timezone?: string;
+      localDate?: string;
+    }
+  ): Promise<{
+    passed: boolean;
+    scorePercent: number;
+    passMark: number;
+    mistakes: Array<{
+      questionId: string;
+      prompt: string;
+      studentAnswer: string;
+      correctAnswer: string;
+      explanation: string;
+    }>;
+    attemptsCount: number;
+    bestScore: number;
+    nextUnlocked: boolean;
+    session?: StudySession;
+    plan?: StudyPlan;
+  }> {
+    const res = await fetchApi(`/studyplan/sessions/${sessionId}/test/submit`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return (res as any)?.data ?? res;
+  },
 };

@@ -26,6 +26,8 @@ export function Settings() {
   const [reminderTime, setReminderTime] = useState('18:00');
   const [dailyTarget, setDailyTarget] = useState(120);
   const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildResult, setRebuildResult] = useState<{ created: number; skipped: number; invalid: number } | null>(null);
+  const [rebuildError, setRebuildError] = useState<string | null>(null);
   const [healthInfo, setHealthInfo] = useState<{
     version?: string;
     buildTime?: string;
@@ -52,12 +54,18 @@ export function Settings() {
 
   const handleRebuildActivity = async () => {
     setRebuilding(true);
+    setRebuildError(null);
     try {
-      const res = await activityService.rebuildActivity();
+      const res: any = await activityService.rebuildActivity();
       await refreshStats();
-      showToast(`Activity rebuilt: ${res.totalEventsCreated ?? 0} events synced.`);
+      const created = Number(res?.created ?? res?.totalEventsCreated ?? 0);
+      const skipped = Number(res?.skipped ?? 0);
+      const invalid = Number(res?.invalid ?? 0);
+      setRebuildResult({ created, skipped, invalid });
+      showToast(`Rebuilt: ${created} created, ${skipped} skipped, ${invalid} invalid`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Rebuild failed';
+      setRebuildError(msg);
       showToast(`Failed to rebuild activity: ${msg}`, 'error');
     } finally {
       setRebuilding(false);
@@ -231,6 +239,19 @@ export function Settings() {
               >
                 <RefreshCw size={16} /> Rebuild Activity History
               </Button>
+              {rebuildResult && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 font-medium">
+                  <CheckCircle2 size={16} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span>
+                    Rebuilt: <strong>{rebuildResult.created}</strong> created, <strong>{rebuildResult.skipped}</strong> skipped, <strong>{rebuildResult.invalid}</strong> invalid
+                  </span>
+                </div>
+              )}
+              {rebuildError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+                  {rebuildError}
+                </div>
+              )}
             </div>
           </Card>
 

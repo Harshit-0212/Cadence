@@ -47,7 +47,9 @@ describe('Coding Problem Management Backend Tests', () => {
       await db.collection('coding_test_cases').deleteMany({ caseKey: { $regex: /^test_/ } });
       await db.collection('coding_problem_private').deleteMany({ verificationMethod: 'Unit Test Fixture' });
       await closeDb();
-    } catch {}
+    } catch (_err) {
+      // ignore cleanup error
+    }
   });
 
   test('1. Role authorization: signup defaults to user, admin check succeeds only for admin role', async (t) => {

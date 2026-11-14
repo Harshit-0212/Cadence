@@ -473,8 +473,8 @@ function RadialHeatmapView({
   const anglePerWeek = (2 * Math.PI) / 53;
 
   return (
-    <div className="relative flex items-center justify-center">
-      <svg width={size} height={size} className="overflow-visible">
+    <div className="relative flex items-center justify-center max-w-full overflow-x-auto py-2">
+      <svg width={size} height={size} className="overflow-visible shrink-0">
         {/* Month labels around edge */}
         {[
           'Jan',

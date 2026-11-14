@@ -5,6 +5,9 @@ import { computeUserStatsSummary } from '../routes/stats.js';
 
 export interface BackfillResult {
   userId: string;
+  created: number;
+  skipped: number;
+  invalid: number;
   assessmentsProcessed: number;
   sessionsProcessed: number;
   interviewsProcessed: number;
@@ -16,11 +19,16 @@ export interface BackfillResult {
 
 export async function backfillUserActivity(userId: string): Promise<BackfillResult> {
   const db = await getDb();
-  let totalEventsCreated = 0;
+  let created = 0;
+  let skipped = 0;
+  let invalid = 0;
 
   // Resolve user timezone
   const user = await db.collection('users').findOne({ $or: [{ id: userId }, { _id: userId as any }] });
   const userTimezone = user?.timezone || 'Asia/Kolkata';
+
+  // Ensure any existing tutor events are purged from activity_events (tutor awards 0 points/events)
+  await db.collection('activity_events').deleteMany({ userId, type: 'tutor' });
 
   // 1. Assessment results (Mock tests)
   // Skip records with no valid submission/completion timestamp
@@ -29,26 +37,32 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
   for (const a of assessments) {
     const rawDate = a.takenAt || a.submittedAt || a.completedAt || a.createdAt;
     if (!rawDate || isNaN(new Date(rawDate).getTime())) {
+      invalid++;
       continue;
     }
     const dateKey = getDateKeyForTimezone(new Date(rawDate), userTimezone);
     const sourceId = a.id || a.resultId || a.testId || String(a._id);
     const eventKey = `mock_test:${sourceId}`;
-    const recorded = await activityStore.recordActivity(
-      userId,
-      'mock_test',
-      dateKey,
-      4,
-      {
-        testId: a.testId || a.id,
-        resultId: a.id,
-        scorePercent: a.scorePercent,
-        subject: a.subject,
-        title: a.subject ? `${a.subject} Mock Test (${a.scorePercent || 0}%)` : 'Mock Test Completed',
-      },
-      eventKey
-    );
-    if (recorded) totalEventsCreated++;
+    try {
+      const recorded = await activityStore.recordActivity(
+        userId,
+        'mock_test',
+        dateKey,
+        4,
+        {
+          testId: a.testId || a.id,
+          resultId: a.id,
+          scorePercent: a.scorePercent,
+          subject: a.subject,
+          title: a.subject ? `${a.subject} Mock Test (${a.scorePercent || 0}%)` : 'Mock Test Completed',
+        },
+        eventKey
+      );
+      if (recorded) created++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
     assessmentsProcessed++;
   }
 
@@ -57,25 +71,31 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
   for (const att of attempts) {
     const rawDate = att.updatedAt || att.createdAt;
     if (!rawDate || isNaN(new Date(rawDate).getTime())) {
+      invalid++;
       continue;
     }
     const dateKey = getDateKeyForTimezone(new Date(rawDate), userTimezone);
     const sourceId = att.resultId || att.id;
     const eventKey = `mock_test:${sourceId}`;
-    const recorded = await activityStore.recordActivity(
-      userId,
-      'mock_test',
-      dateKey,
-      4,
-      {
-        testId: att.id,
-        resultId: att.resultId,
-        subject: att.subject,
-        title: `${att.subject || 'Mock'} Test`,
-      },
-      eventKey
-    );
-    if (recorded) totalEventsCreated++;
+    try {
+      const recorded = await activityStore.recordActivity(
+        userId,
+        'mock_test',
+        dateKey,
+        4,
+        {
+          testId: att.id,
+          resultId: att.resultId,
+          subject: att.subject,
+          title: `${att.subject || 'Mock'} Test`,
+        },
+        eventKey
+      );
+      if (recorded) created++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
   }
 
   // 2. Study sessions (Points: 3)
@@ -84,20 +104,26 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
   for (const s of sessions) {
     const rawDate = s.completedAt || s.submittedAt || s.createdAt || s.date;
     if (!rawDate || isNaN(new Date(rawDate).getTime())) {
+      invalid++;
       continue;
     }
     const dateKey = getDateKeyForTimezone(new Date(rawDate), userTimezone);
     const sourceId = s.id || String(s._id);
     const eventKey = `session:${sourceId}`;
-    const recorded = await activityStore.recordActivity(
-      userId,
-      'session',
-      dateKey,
-      3,
-      { sessionId: sourceId, title: s.title || 'Study Session' },
-      eventKey
-    );
-    if (recorded) totalEventsCreated++;
+    try {
+      const recorded = await activityStore.recordActivity(
+        userId,
+        'session',
+        dateKey,
+        3,
+        { sessionId: sourceId, title: s.title || 'Study Session' },
+        eventKey
+      );
+      if (recorded) created++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
     sessionsProcessed++;
   }
 
@@ -107,27 +133,33 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
   for (const i of interviews) {
     const rawDate = i.createdAt || i.completedAt || i.submittedAt;
     if (!rawDate || isNaN(new Date(rawDate).getTime())) {
+      invalid++;
       continue;
     }
     const dateKey = getDateKeyForTimezone(new Date(rawDate), userTimezone);
     const sourceId = i.id || String(i._id);
     const eventKey = `interview:${sourceId}`;
-    const recorded = await activityStore.recordActivity(
-      userId,
-      'interview',
-      dateKey,
-      4,
-      {
-        reportId: sourceId,
-        interviewId: sourceId,
-        overallScore: i.overallScore,
-        role: i.role,
-        topic: i.topic,
-        title: `Interview: ${i.role || 'Practice'} (${i.overallScore || 0}%)`,
-      },
-      eventKey
-    );
-    if (recorded) totalEventsCreated++;
+    try {
+      const recorded = await activityStore.recordActivity(
+        userId,
+        'interview',
+        dateKey,
+        4,
+        {
+          reportId: sourceId,
+          interviewId: sourceId,
+          overallScore: i.overallScore,
+          role: i.role,
+          topic: i.topic,
+          title: `Interview: ${i.role || 'Practice'} (${i.overallScore || 0}%)`,
+        },
+        eventKey
+      );
+      if (recorded) created++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
     interviewsProcessed++;
   }
 
@@ -137,20 +169,26 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
   for (const d of documents) {
     const rawDate = d.uploadedAt || d.createdAt;
     if (!rawDate || isNaN(new Date(rawDate).getTime())) {
+      invalid++;
       continue;
     }
     const dateKey = getDateKeyForTimezone(new Date(rawDate), userTimezone);
     const sourceId = d.id || String(d._id);
     const eventKey = `document:${sourceId}`;
-    const recorded = await activityStore.recordActivity(
-      userId,
-      'document',
-      dateKey,
-      1,
-      { docId: sourceId, filename: d.filename || d.title || d.fileName, title: `Uploaded: ${d.filename || d.fileName || 'Document'}` },
-      eventKey
-    );
-    if (recorded) totalEventsCreated++;
+    try {
+      const recorded = await activityStore.recordActivity(
+        userId,
+        'document',
+        dateKey,
+        1,
+        { docId: sourceId, filename: d.filename || d.title || d.fileName, title: `Uploaded: ${d.filename || d.fileName || 'Document'}` },
+        eventKey
+      );
+      if (recorded) created++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
     documentsProcessed++;
   }
 
@@ -160,6 +198,7 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
   for (const c of codingSubs) {
     const rawDate = c.createdAt || c.submittedAt;
     if (!rawDate || isNaN(new Date(rawDate).getTime())) {
+      invalid++;
       continue;
     }
     const dateKey = getDateKeyForTimezone(new Date(rawDate), userTimezone);
@@ -167,21 +206,26 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
     const eventKey = `coding_submission:${sourceId}`;
     const isAccepted = c.verdict === 'accepted' || c.verdict === 'Accepted' || c.status === 'accepted';
     const points = isAccepted ? 3 : 1;
-    const recorded = await activityStore.recordActivity(
-      userId,
-      'coding_submission',
-      dateKey,
-      points,
-      {
-        submissionId: sourceId,
-        problemId: c.problemId,
-        problemSlug: c.problemSlug,
-        verdict: c.verdict,
-        title: `Coding: ${c.problemTitle || c.problemSlug || 'Problem'} (${c.verdict || 'submitted'})`,
-      },
-      eventKey
-    );
-    if (recorded) totalEventsCreated++;
+    try {
+      const recorded = await activityStore.recordActivity(
+        userId,
+        'coding_submission',
+        dateKey,
+        points,
+        {
+          submissionId: sourceId,
+          problemId: c.problemId,
+          problemSlug: c.problemSlug,
+          verdict: c.verdict,
+          title: `Coding: ${c.problemTitle || c.problemSlug || 'Problem'} (${c.verdict || 'submitted'})`,
+        },
+        eventKey
+      );
+      if (recorded) created++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
     codingProcessed++;
   }
 
@@ -194,20 +238,26 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
   for (const f of flashcards) {
     const rawDate = f.lastReviewedAt || f.updatedAt || f.createdAt;
     if (!rawDate || isNaN(new Date(rawDate).getTime())) {
+      invalid++;
       continue;
     }
     const dateKey = getDateKeyForTimezone(new Date(rawDate), userTimezone);
     const sourceId = f.id || String(f._id);
     const eventKey = `flashcard:${sourceId}:${dateKey}`;
-    const recorded = await activityStore.recordActivity(
-      userId,
-      'flashcard',
-      dateKey,
-      1,
-      { flashcardId: sourceId, title: 'Flashcard Reviewed' },
-      eventKey
-    );
-    if (recorded) totalEventsCreated++;
+    try {
+      const recorded = await activityStore.recordActivity(
+        userId,
+        'flashcard',
+        dateKey,
+        1,
+        { flashcardId: sourceId, title: 'Flashcard Reviewed' },
+        eventKey
+      );
+      if (recorded) created++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
     flashcardsProcessed++;
   }
 
@@ -216,13 +266,16 @@ export async function backfillUserActivity(userId: string): Promise<BackfillResu
 
   return {
     userId,
+    created,
+    skipped,
+    invalid,
     assessmentsProcessed,
     sessionsProcessed,
     interviewsProcessed,
     documentsProcessed,
     codingProcessed,
     flashcardsProcessed,
-    totalEventsCreated,
+    totalEventsCreated: created,
   };
 }
 
@@ -294,18 +347,24 @@ export async function cleanupAndRepairUserActivity(userId: string): Promise<{
     .toArray();
 
   for (const ev of wrongDateEvents) {
-    await db.collection('activity_events').updateOne(
-      { _id: ev._id as any },
-      {
-        $set: {
-          dateKey: realTestDateKey,
-          points: 4,
-          eventKey: `mock_test:${realTestResultId || ev.meta?.resultId || ev.meta?.testId || 'repaired'}`,
-          'meta.title': `${realTestSubject} Mock Test (${realTestScore}%)`,
-        },
-      }
-    );
-    datesRepaired++;
+    try {
+      await db.collection('activity_events').updateOne(
+        { _id: ev._id as any },
+        {
+          $set: {
+            dateKey: realTestDateKey,
+            points: 4,
+            eventKey: `mock_test:${realTestResultId || ev.meta?.resultId || ev.meta?.testId || 'repaired'}`,
+            'meta.title': `${realTestSubject} Mock Test (${realTestScore}%)`,
+          },
+        }
+      );
+      datesRepaired++;
+    } catch {
+      // If duplicate key error, remove this duplicate event
+      await db.collection('activity_events').deleteOne({ _id: ev._id as any });
+      duplicatesRemoved++;
+    }
   }
 
   // 2. REPAIR SESSION POINTS (Ensure 3 points, not 1)
@@ -350,16 +409,19 @@ export async function cleanupAndRepairUserActivity(userId: string): Promise<{
     });
 
     if (matching.length > 1) {
-      // Keep one, remove the others
+      // Keep one, remove the others FIRST to free up any conflicting keys
       const [primary, ...duplicates] = matching;
-      // Ensure primary has canonical key and 4 points
-      await db.collection('activity_events').updateOne(
-        { _id: primary._id as any },
-        { $set: { eventKey: canonicalKey, points: 4 } }
-      );
       for (const dup of duplicates) {
         await db.collection('activity_events').deleteOne({ _id: dup._id as any });
         duplicatesRemoved++;
+      }
+      try {
+        await db.collection('activity_events').updateOne(
+          { _id: primary._id as any },
+          { $set: { eventKey: canonicalKey, points: 4 } }
+        );
+      } catch {
+        // Ignored if duplicate
       }
     }
   }
@@ -398,9 +460,15 @@ export async function cleanupAndRepairUserActivity(userId: string): Promise<{
     }
   }
 
-  // 5. RECOMPUTE STREAK & MAINTAIN USER_STATS
+  // 5. RECOMPUTE STREAK & MAINTAIN USER_STATS & EVALUATE BADGES
   await activityStore.computeStreak(userId, todayKey);
   await computeUserStatsSummary(userId, userTimezone, todayKey);
+  try {
+    const { badgesStore } = await import('./achievements.js');
+    await badgesStore.evaluateBadgesForUser(userId);
+  } catch {
+    // Graceful fallback
+  }
 
   return {
     duplicatesRemoved,

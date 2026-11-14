@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BookX, CheckCircle, Search, RefreshCw, Sparkles, Filter, ChevronRight, Loader2 } from 'lucide-react';
+import { BookX, CheckCircle, Search, RefreshCw, RotateCcw, Sparkles, Filter, ChevronRight, Loader2 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { PageContainer, CardGrid } from '@/components/layout/PageContainer';
@@ -24,73 +24,71 @@ interface MistakeItem {
 
 export function Mistakes() {
   const { showToast } = useToast();
-  const [filter, setFilter] = useState<'all' | 'unresolved'>('unresolved');
+  const [filter, setFilter] = useState<'all' | 'unresolved' | 'resolved'>('unresolved');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const [items, setItems] = useState<MistakeItem[]>([
-    {
-      id: 'm1',
-      question: 'What is the worst-case time complexity of QuickSort?',
-      userAnswer: 'O(N log N)',
-      correctAnswer: 'O(N²)',
-      subject: 'Data Structures & Algorithms',
-      topic: 'Sorting Algorithms',
-      explanation: 'QuickSort degrades to O(N²) when the selected pivot is consistently the minimum or maximum element.',
-      resolved: false,
-    },
-    {
-      id: 'm2',
-      question: 'In Operating Systems, what problem does the Banker algorithm solve?',
-      userAnswer: 'Process scheduling starvation',
-      correctAnswer: 'Deadlock avoidance',
-      subject: 'Operating Systems',
-      topic: 'Deadlock Handling',
-      explanation: 'The Banker algorithm tests for safety by simulating allocation before granting resource requests.',
-      resolved: false,
-    },
-  ]);
+  const [items, setItems] = useState<MistakeItem[]>([]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const fetched = await learningFeaturesService.getMistakes();
+      if (fetched && fetched.length > 0) {
+        setItems(
+          fetched.map((m: any) => ({
+            id: m.id || m._id,
+            question: m.question,
+            userAnswer: m.userAnswer,
+            correctAnswer: m.correctAnswer,
+            subject: m.subject || 'General',
+            topic: m.topic || 'General',
+            explanation: m.explanation || 'Review this concept to master the topic.',
+            resolved: Boolean(m.resolved),
+          }))
+        );
+      } else {
+        setItems([]);
+      }
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const fetched = await learningFeaturesService.getMistakes();
-        if (fetched && fetched.length > 0) {
-          setItems(
-            fetched.map((m) => ({
-              id: m._id,
-              question: m.question,
-              userAnswer: m.userAnswer,
-              correctAnswer: m.correctAnswer,
-              subject: m.subject,
-              topic: m.topic,
-              explanation: m.explanation,
-              resolved: m.resolved,
-            }))
-          );
-        }
-      } catch {
-        // Keeps fallback items
-      } finally {
-        setLoading(false);
-      }
-    }
     loadData();
   }, []);
 
   const handleResolve = async (id: string) => {
     try {
       await learningFeaturesService.resolveMistake(id);
+      showToast('Marked mistake as resolved! +15 XP earned.', 'success');
     } catch {
-      // offline fallback
+      showToast('Marked mistake as resolved.', 'info');
     }
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, resolved: true } : item)));
-    showToast('Marked mistake as resolved! +15 XP earned.', 'success');
     invalidateStats();
   };
 
+  const handleReopen = async (id: string) => {
+    try {
+      await learningFeaturesService.reopenMistake(id);
+      showToast('Reopened mistake for active review.', 'info');
+    } catch {
+      showToast('Reopened mistake.', 'info');
+    }
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, resolved: false } : item)));
+    invalidateStats();
+  };
+
+  const unresolvedCount = items.filter((i) => !i.resolved).length;
+  const resolvedCount = items.filter((i) => i.resolved).length;
+
   const filtered = items.filter((item) => {
     if (filter === 'unresolved' && item.resolved) return false;
+    if (filter === 'resolved' && !item.resolved) return false;
     if (search && !item.question.toLowerCase().includes(search.toLowerCase()) && !item.topic.toLowerCase().includes(search.toLowerCase())) {
       return false;
     }
@@ -110,7 +108,14 @@ export function Mistakes() {
                 size="sm"
                 onClick={() => setFilter('unresolved')}
               >
-                Unresolved ({items.filter((i) => !i.resolved).length})
+                Unresolved ({unresolvedCount})
+              </Button>
+              <Button
+                variant={filter === 'resolved' ? 'primary' : 'outline'}
+                size="sm"
+                onClick={() => setFilter('resolved')}
+              >
+                Resolved ({resolvedCount})
               </Button>
               <Button
                 variant={filter === 'all' ? 'primary' : 'outline'}
@@ -136,11 +141,20 @@ export function Mistakes() {
           </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-[#6542C5]" />
+            <p className="mt-3 text-xs text-[#8A8192]">Loading mistake notebook...</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <EmptyState
             icon={CheckCircle}
-            title="All clear!"
-            description="You have no unresolved mistakes matching your filters."
+            title={filter === 'unresolved' ? 'All clear!' : 'No mistakes found'}
+            description={
+              filter === 'unresolved'
+                ? 'You have no unresolved mistakes. Great job mastering your weak spots!'
+                : 'No mistakes matching your current filter.'
+            }
           />
         ) : (
           <CardGrid cols={12}>
@@ -180,15 +194,20 @@ export function Mistakes() {
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-[var(--border)] flex justify-end">
+                  <div className="mt-4 pt-3 border-t border-[var(--border)] flex justify-end gap-2">
                     {!item.resolved ? (
                       <Button size="sm" variant="primary" onClick={() => handleResolve(item.id)}>
                         <CheckCircle size={14} /> Mark Resolved
                       </Button>
                     ) : (
-                      <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-                        <CheckCircle size={14} /> Resolved
-                      </span>
+                      <>
+                        <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1 mr-auto">
+                          <CheckCircle size={14} /> Resolved
+                        </span>
+                        <Button size="sm" variant="outline" onClick={() => handleReopen(item.id)}>
+                          <RotateCcw size={13} /> Reopen
+                        </Button>
+                      </>
                     )}
                   </div>
                 </Card>

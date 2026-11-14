@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
-import { Mail, Calendar, Target, Zap, Flame, BookOpen, Edit3, Check, Camera } from 'lucide-react';
+import { useRef, useState, useEffect } from 'react';
+import { Mail, Calendar, Target, Zap, Flame, BookOpen, Edit3, Check, Camera, Award } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Reveal, Stagger, StaggerItem } from '@/components/ui/Reveal';
 import { motion } from 'framer-motion';
@@ -13,6 +14,8 @@ import { useAuth } from '@/store/AuthContext';
 import { useAppData } from '@/store/AppDataContext';
 import { useStats } from '@/store/StatsContext';
 import { useToast } from '@/store/ToastContext';
+import { gamificationService, type BadgeItem } from '@/services/gamificationService';
+import { activityService } from '@/services/activityService';
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 
@@ -24,7 +27,25 @@ export function Profile() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name ?? '');
   const [uploading, setUploading] = useState(false);
+  const [badges, setBadges] = useState<BadgeItem[]>([]);
+  const [recentEvents, setRecentEvents] = useState<Array<{ type: string; points: number; time: string; title?: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    gamificationService.getBadges().then((data) => {
+      if (Array.isArray(data)) setBadges(data);
+    }).catch(() => {});
+
+    activityService.getActivity().then((res) => {
+      const dailyData = res?.dailyData || {};
+      const allItems: Array<{ type: string; points: number; time: string; title?: string }> = [];
+      Object.values(dailyData).forEach((d: any) => {
+        if (Array.isArray(d.items)) allItems.push(...d.items);
+      });
+      allItems.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+      setRecentEvents(allItems.slice(0, 5));
+    }).catch(() => {});
+  }, []);
 
   const save = () => {
     setEditing(false);
@@ -159,28 +180,68 @@ export function Profile() {
               )}
             </Card>
 
+            {/* Badges & Honors */}
             <Card>
-              <CardHeader title="Recent Activity" subtitle="Your latest study sessions" />
-              <div className="space-y-2">
-                {[
-                  { label: 'Completed Dynamic Programming session', time: '2h ago', icon: BookOpen },
-                  { label: 'Scored 78% on DSA quiz', time: 'Yesterday', icon: Zap },
-                  { label: 'Reached 7-day streak', time: '2 days ago', icon: Flame },
-                  { label: 'Completed Linked Lists session', time: '3 days ago', icon: BookOpen },
-                ].map((a, i) => (
+              <div className="flex items-center justify-between pb-3 border-b border-ink-100 dark:border-ink-800">
+                <div>
+                  <h3 className="font-display text-base font-semibold text-ink-900 dark:text-ink-50">
+                    Badges & Honors
+                  </h3>
+                  <p className="text-xs text-ink-400">Verified milestone achievements</p>
+                </div>
+                <Link to="/app/achievements" className="text-xs font-semibold text-[#6542C5] dark:text-[#B59AF7] hover:underline">
+                  View all ({badges.length}) →
+                </Link>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {badges.filter((b) => b.unlocked).slice(0, 6).map((b) => (
                   <div
-                    key={i}
-                    className="flex items-center gap-3 rounded-xl border border-ink-200 px-4 py-3 dark:border-ink-800"
+                    key={b.id}
+                    className="p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/20 dark:bg-emerald-950/20 flex items-center gap-2.5"
                   >
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-50 text-[#6542C5] dark:bg-primary-900/40">
-                      <a.icon size={16} />
+                    <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                      <Award size={16} />
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-ink-900 dark:text-ink-50">{a.label}</p>
-                      <p className="text-xs text-ink-400">{a.time}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-ink-900 dark:text-ink-50 truncate">{b.name}</p>
+                      <p className="text-[10px] text-ink-400 capitalize truncate">{b.rarity}</p>
                     </div>
                   </div>
                 ))}
+                {badges.filter((b) => b.unlocked).length === 0 && (
+                  <p className="text-xs text-ink-400 col-span-3 py-2 text-center">
+                    No badges unlocked yet. Complete mock tests and study sessions to earn badges!
+                  </p>
+                )}
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="Recent Activity" subtitle="Your latest verified learning events" />
+              <div className="space-y-2">
+                {recentEvents.length > 0 ? (
+                  recentEvents.map((ev, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-3 rounded-xl border border-ink-200 px-4 py-3 dark:border-ink-800"
+                    >
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-50 text-[#6542C5] dark:bg-primary-900/40">
+                        <Zap size={16} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-ink-900 dark:text-ink-50 truncate">
+                          {ev.title || `Completed ${ev.type.replace('_', ' ')}`}
+                        </p>
+                        <p className="text-xs text-ink-400">
+                          {new Date(ev.time).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · +{ev.points} pts
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-ink-400 py-3 text-center">No recent activity recorded yet.</p>
+                )}
               </div>
             </Card>
           </div>

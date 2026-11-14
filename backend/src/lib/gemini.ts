@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI, SchemaType, type Part } from '@google/generative-ai';
+export { SchemaType };
 import { config } from '../config.js';
 import type { ExtractedDocument } from './extractText.js';
 import { userApiKeyStore } from './userApiKeyStore.js';
@@ -75,7 +76,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function generateJson<T>(parts: Part[], schema: object, geminiClient?: GoogleGenerativeAI): Promise<T> {
+export async function generateJson<T>(parts: Part[], schema: object, geminiClient?: GoogleGenerativeAI): Promise<T> {
   const model = (geminiClient ?? getClient()).getGenerativeModel({
     model: config.geminiModel,
     generationConfig: {

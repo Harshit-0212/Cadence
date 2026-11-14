@@ -19,6 +19,9 @@ import {
   Lightbulb,
   Plus,
   Target,
+  BookOpen,
+  Layers,
+  BookmarkPlus,
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageContainer } from '@/components/layout/PageContainer';
@@ -30,6 +33,8 @@ import { useAppData } from '@/store/AppDataContext';
 import { useToast } from '@/store/ToastContext';
 import { mockTestStore } from '@/store/MockTestStore';
 import { mockTestService } from '@/services/mockTestService';
+import { learningFeaturesService } from '@/services/learningFeaturesService';
+import { fetchApi } from '@/services/api';
 import type { DocumentAnalysisResponse, MockTest, MockTestResult, Question } from '@/types';
 
 const ACCEPTED_DOCUMENT_TYPES = [
@@ -106,14 +111,51 @@ export function Assessments() {
   // Load result from URL if attemptId is present
   useEffect(() => {
     if (attemptId) {
-      mockTestService.getResultById(attemptId).then((r) => {
+      mockTestService.getResultById(attemptId).then((r: any) => {
         if (r) {
           setResult(r);
+          if (r.test) {
+            setTest(r.test);
+          }
           setPhase('result');
         }
       });
     }
   }, [attemptId]);
+
+  const handleRetakeWrong = (wrongQs: any[]) => {
+    if (!wrongQs || wrongQs.length === 0) {
+      showToast('No mistakes to retake!', 'info');
+      return;
+    }
+    const retakeTest: MockTest = {
+      id: `retake_${Date.now()}`,
+      config: {
+        subject: result?.subject || 'Retake Mistakes',
+        topics: [],
+        difficulty: 'mixed',
+        numQuestions: wrongQs.length,
+      },
+      questions: wrongQs.map((q) => ({
+        id: q.id,
+        type: q.type || 'mcq',
+        prompt: q.prompt,
+        options: q.options && q.options.length ? q.options : [q.correctAnswer, 'Alternative B', 'Alternative C', 'Alternative D'],
+        correctAnswer: q.correctAnswer,
+        explanation: q.explanation,
+        topic: q.topic || 'General',
+        difficulty: 'medium',
+      })),
+      createdAt: new Date().toISOString(),
+      timeLimitSeconds: wrongQs.length * 90,
+    };
+    setTest(retakeTest);
+    setAnswers({});
+    setCurrentQ(0);
+    setSecondsLeft(wrongQs.length * 90);
+    startedAtRef.current = Date.now();
+    setPhase('taking');
+  };
 
   // Check for in-progress tests on mount
   useEffect(() => {
@@ -628,9 +670,11 @@ export function Assessments() {
                   </h3>
                   <div className="space-y-2">
                     {quizHistory.slice(0, 5).map((r) => (
-                      <div
+                      <button
                         key={r.testId}
-                        className="flex items-center justify-between rounded-xl border border-ink-200 p-3 dark:border-ink-800"
+                        type="button"
+                        onClick={() => navigate(`/app/assessments/results/${r.testId}`)}
+                        className="flex w-full items-center justify-between rounded-xl border border-ink-200 p-3 text-left transition hover:border-[#6542C5] hover:bg-primary-50/20 dark:border-ink-800 dark:hover:border-primary-700 dark:hover:bg-primary-900/10 cursor-pointer"
                       >
                         <div>
                           <p className="text-sm font-medium text-ink-800 dark:text-ink-100">
@@ -646,8 +690,11 @@ export function Assessments() {
                             {r.correctCount}/{r.totalQuestions} correct
                           </p>
                         </div>
-                        <Badge tone={r.scorePercent >= 60 ? 'success' : 'warning'}>{r.scorePercent}%</Badge>
-                      </div>
+                        <div className="flex items-center gap-2">
+                          <Badge tone={r.scorePercent >= 60 ? 'success' : 'warning'}>{r.scorePercent}%</Badge>
+                          <ChevronRight size={16} className="text-ink-300" />
+                        </div>
+                      </button>
                     ))}
                   </div>
                 </Card>
@@ -676,7 +723,12 @@ export function Assessments() {
 
           {phase === 'result' && result && (
             <motion.div key="result" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <ResultView result={result} test={test || undefined} onReset={reset} />
+              <ResultView
+                result={result}
+                test={test || undefined}
+                onReset={reset}
+                onRetakeWrong={handleRetakeWrong}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -810,10 +862,146 @@ function TakingView({
   );
 }
 
-function ResultView({ result, test, onReset }: { result: MockTestResult; test?: MockTest; onReset: () => void }) {
+function ResultView({
+  result,
+  test,
+  onReset,
+  onRetakeWrong,
+}: {
+  result: MockTestResult;
+  test?: MockTest;
+  onReset: () => void;
+  onRetakeWrong?: (wrongQuestions: any[]) => void;
+}) {
+  const { showToast } = useToast();
   const passed = result.scorePercent >= 60;
+  const [filter, setFilter] = useState<'all' | 'correct' | 'wrong'>('all');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Build unified review list
+  const questionsToReview = (function () {
+    if (result.perQuestion && result.perQuestion.length > 0) {
+      return result.perQuestion.map((pq: any, idx: number) => ({
+        id: pq.questionId || String(idx),
+        prompt: pq.prompt || test?.questions?.[idx]?.prompt || `Question ${idx + 1}`,
+        userAnswer: pq.userAnswer || pq.chosenAnswer || 'Not Answered',
+        correctAnswer: pq.correctAnswer || test?.questions?.[idx]?.correctAnswer || '',
+        correct: pq.correct ?? pq.isCorrect ?? false,
+        explanation: pq.explanation || test?.questions?.[idx]?.explanation || '',
+        topic: pq.topic || test?.questions?.[idx]?.topic || 'General',
+        type: test?.questions?.[idx]?.type || 'mcq',
+        options: test?.questions?.[idx]?.options || [],
+      }));
+    }
+    if (test?.questions) {
+      return test.questions.map((q: any, idx: number) => {
+        const pq: any = result.perQuestion?.find((p: any) => p.questionId === q.id);
+        const correct = pq?.correct ?? pq?.isCorrect ?? false;
+        return {
+          id: q.id,
+          prompt: q.prompt,
+          userAnswer: pq?.userAnswer || 'Not Answered',
+          correctAnswer: q.correctAnswer,
+          correct,
+          explanation: q.explanation || '',
+          topic: q.topic || 'General',
+          type: q.type,
+          options: q.options || [],
+        };
+      });
+    }
+    return [];
+  })();
+
+  const wrongQuestions = questionsToReview.filter((q) => !q.correct);
+  const correctQuestions = questionsToReview.filter((q) => q.correct);
+
+  const filteredReview = questionsToReview.filter((q) => {
+    if (filter === 'correct') return q.correct;
+    if (filter === 'wrong') return !q.correct;
+    return true;
+  });
+
+  // Topic breakdown calculation
+  const topicBreakdown = (function () {
+    if (result.topicBreakdown && result.topicBreakdown.length > 0) {
+      return result.topicBreakdown;
+    }
+    const map = new Map<string, { topic: string; total: number; correct: number }>();
+    for (const q of questionsToReview) {
+      const t = q.topic || 'General';
+      const curr = map.get(t) || { topic: t, total: 0, correct: 0 };
+      curr.total++;
+      if (q.correct) curr.correct++;
+      map.set(t, curr);
+    }
+    return Array.from(map.values()).map((tb) => ({
+      ...tb,
+      percent: tb.total > 0 ? Math.round((tb.correct / tb.total) * 100) : 0,
+    }));
+  })();
+
+  // Action: Add mistakes to flashcards
+  const handleAddToFlashcards = async () => {
+    if (wrongQuestions.length === 0) {
+      showToast('All answers were correct! No mistakes to add.', 'info');
+      return;
+    }
+    setActionLoading('flashcards');
+    try {
+      let added = 0;
+      for (const q of wrongQuestions) {
+        await learningFeaturesService.createFlashcard({
+          front: q.prompt,
+          back: q.correctAnswer,
+          subject: result.subject || 'Mock Test',
+          topic: q.topic,
+        });
+        added++;
+      }
+      showToast(`Created ${added} flashcards from incorrect answers!`, 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to add flashcards';
+      showToast(msg, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Action: Add to Mistake Notebook
+  const handleAddToMistakes = async () => {
+    if (wrongQuestions.length === 0) {
+      showToast('All answers were correct! No mistakes to record.', 'info');
+      return;
+    }
+    setActionLoading('mistakes');
+    try {
+      let added = 0;
+      for (const q of wrongQuestions) {
+        await fetchApi('/mistakes', {
+          method: 'POST',
+          body: JSON.stringify({
+            question: q.prompt,
+            userAnswer: q.userAnswer,
+            correctAnswer: q.correctAnswer,
+            subject: result.subject || 'Mock Test',
+            topic: q.topic,
+            explanation: q.explanation || 'Review concept from mock test',
+          }),
+        });
+        added++;
+      }
+      showToast(`Saved ${added} items to your Mistake Notebook!`, 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to save mistakes';
+      showToast(msg, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-2xl space-y-6">
       <Card padding="lg">
         <div className="text-center">
           <div
@@ -826,7 +1014,9 @@ function ResultView({ result, test, onReset }: { result: MockTestResult; test?: 
             <Trophy size={32} />
           </div>
           <h2 className="font-display text-2xl font-bold text-ink-900 dark:text-ink-50">Test Complete</h2>
-          <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">You scored</p>
+          <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">
+            {result.subject || 'Mock Test'} Score
+          </p>
           <p className="font-display text-4xl font-bold text-ink-900 dark:text-ink-50">{result.scorePercent}%</p>
           <p className="text-sm text-ink-500">
             {result.correctCount}/{result.totalQuestions} correct · {formatClock(result.timeSpentSeconds)} taken
@@ -848,7 +1038,82 @@ function ResultView({ result, test, onReset }: { result: MockTestResult; test?: 
           </div>
         </div>
 
-        {result.weakAreas.length > 0 && (
+        {/* Action Buttons for Mistakes */}
+        {wrongQuestions.length > 0 && (
+          <div className="mt-5 p-4 rounded-xl bg-ink-50 dark:bg-ink-800/40 border border-ink-200 dark:border-ink-700 space-y-2.5">
+            <p className="text-xs font-semibold text-ink-700 dark:text-ink-200 flex items-center gap-1.5">
+              <Sparkles size={14} className="text-[#6542C5]" /> Reinforce Your Weaknesses ({wrongQuestions.length} mistakes)
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onRetakeWrong?.(wrongQuestions)}
+                className="text-xs"
+              >
+                <RotateCcw size={13} /> Retake Wrong
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                loading={actionLoading === 'flashcards'}
+                onClick={handleAddToFlashcards}
+                className="text-xs"
+              >
+                <Layers size={13} /> To Flashcards
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                loading={actionLoading === 'mistakes'}
+                onClick={handleAddToMistakes}
+                className="text-xs"
+              >
+                <BookmarkPlus size={13} /> To Mistakes
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Topic Breakdown */}
+        {topicBreakdown.length > 0 && (
+          <div className="mt-5 rounded-xl border border-ink-200 p-4 dark:border-ink-700 space-y-3">
+            <h3 className="font-display text-sm font-semibold text-ink-900 dark:text-ink-50 flex items-center justify-between">
+              <span>Topic Breakdown</span>
+              <span className="text-xs font-normal text-ink-400">{topicBreakdown.length} topics tested</span>
+            </h3>
+            <div className="space-y-2">
+              {topicBreakdown.map((tb: any) => {
+                const percent = tb.percent ?? (tb.total > 0 ? Math.round((tb.correct / tb.total) * 100) : 0);
+                return (
+                  <div key={tb.topic} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-ink-800 dark:text-ink-200">{tb.topic}</span>
+                      <span className="text-ink-500 font-mono">
+                        {tb.correct}/{tb.total} ({percent}%)
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-ink-100 dark:bg-ink-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          percent >= 75
+                            ? 'bg-emerald-500'
+                            : percent >= 50
+                            ? 'bg-amber-500'
+                            : 'bg-rose-500'
+                        }`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Weak Areas list */}
+        {result.weakAreas && result.weakAreas.length > 0 && (
           <div className="mt-5 rounded-xl border border-warning-200 bg-warning-50 p-4 dark:border-warning-700 dark:bg-warning-700/20">
             <h3 className="mb-2 flex items-center gap-2 font-display text-sm font-semibold text-warning-700 dark:text-warning-200">
               <AlertTriangle size={16} /> Weak Areas
@@ -863,14 +1128,52 @@ function ResultView({ result, test, onReset }: { result: MockTestResult; test?: 
           </div>
         )}
 
-        {test?.questions && test.questions.length > 0 && (
-          <div className="mt-5 space-y-2">
-            <h3 className="font-display text-sm font-semibold text-ink-900 dark:text-ink-50">Review answers</h3>
-            {test.questions.map((q, i) => {
-              const userAns = result.perQuestion.find((p) => p.questionId === q.id);
-              const correct = userAns?.correct ?? false;
-              return <ReviewRow key={q.id} q={q} index={i} correct={correct} />;
-            })}
+        {/* Per-Question Review with Filter */}
+        {questionsToReview.length > 0 && (
+          <div className="mt-6 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-sm font-semibold text-ink-900 dark:text-ink-50">
+                Question Review ({questionsToReview.length})
+              </h3>
+              <div className="flex items-center gap-1 p-1 rounded-xl bg-ink-100 dark:bg-ink-800">
+                <button
+                  onClick={() => setFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                    filter === 'all'
+                      ? 'bg-white dark:bg-[#1D1922] text-ink-900 dark:text-ink-50 shadow-sm'
+                      : 'text-ink-500 hover:text-ink-900 dark:text-ink-400'
+                  }`}
+                >
+                  All ({questionsToReview.length})
+                </button>
+                <button
+                  onClick={() => setFilter('correct')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                    filter === 'correct'
+                      ? 'bg-white dark:bg-[#1D1922] text-emerald-600 dark:text-emerald-400 shadow-sm'
+                      : 'text-ink-500 hover:text-ink-900 dark:text-ink-400'
+                  }`}
+                >
+                  Correct ({correctQuestions.length})
+                </button>
+                <button
+                  onClick={() => setFilter('wrong')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                    filter === 'wrong'
+                      ? 'bg-white dark:bg-[#1D1922] text-rose-600 dark:text-rose-400 shadow-sm'
+                      : 'text-ink-500 hover:text-ink-900 dark:text-ink-400'
+                  }`}
+                >
+                  Wrong ({wrongQuestions.length})
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {filteredReview.map((q, i) => (
+                <ReviewItem key={q.id || i} item={q} index={i} />
+              ))}
+            </div>
           </div>
         )}
 
@@ -882,34 +1185,71 @@ function ResultView({ result, test, onReset }: { result: MockTestResult; test?: 
   );
 }
 
-function ReviewRow({ q, index, correct }: { q: Question; index: number; correct: boolean }) {
+function ReviewItem({
+  item,
+  index,
+}: {
+  item: {
+    prompt: string;
+    userAnswer: string;
+    correctAnswer: string;
+    correct: boolean;
+    explanation?: string;
+    topic?: string;
+  };
+  index: number;
+}) {
   return (
     <div
-      className={`rounded-xl border p-3 ${correct ? 'border-success-200 bg-success-50/50 dark:border-success-700 dark:bg-success-700/10' : 'border-error-200 bg-error-50/50 dark:border-error-700 dark:bg-error-700/10'}`}
+      className={`rounded-xl border p-4 space-y-2 ${
+        item.correct
+          ? 'border-success-200 bg-success-50/40 dark:border-success-800/60 dark:bg-success-900/10'
+          : 'border-error-200 bg-error-50/40 dark:border-error-800/60 dark:bg-error-900/10'
+      }`}
     >
-      <div className="flex items-start gap-2">
-        <span
-          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${correct ? 'bg-success-500' : 'bg-error-500'}`}
-        >
-          {correct ? '✓' : '✗'}
-        </span>
-        <div className="flex-1">
-          <p className="text-sm font-medium text-ink-900 dark:text-ink-50">
-            {index + 1}. {q.prompt}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
+          <span
+            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${
+              item.correct ? 'bg-success-500' : 'bg-error-500'
+            }`}
+          >
+            {item.correct ? '✓' : '✗'}
+          </span>
+          <p className="text-sm font-semibold text-ink-900 dark:text-ink-50">
+            {index + 1}. {item.prompt}
           </p>
-          {!correct && (
-            <p className="mt-1 text-xs text-ink-500">
-              Correct answer: <span className="text-success-700">{q.correctAnswer}</span>
-            </p>
-          )}
-          {q.explanation && (
-            <p className="mt-1.5 flex items-start gap-1.5 text-xs text-ink-500 dark:text-ink-400">
-              <Lightbulb size={12} className="mt-0.5 shrink-0 text-[#6542C5]" />
-              <span>{q.explanation}</span>
-            </p>
-          )}
         </div>
+        {item.topic && (
+          <Badge tone="neutral" className="text-[10px] shrink-0">
+            {item.topic}
+          </Badge>
+        )}
       </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
+        <div className="p-2 rounded-lg bg-white/60 dark:bg-black/20 border border-ink-100 dark:border-white/5">
+          <span className="text-ink-400 text-[10px] uppercase font-semibold block">Your Answer:</span>
+          <span className={`font-medium ${item.correct ? 'text-success-700 dark:text-success-300' : 'text-error-700 dark:text-error-300'}`}>
+            {item.userAnswer || 'Not answered'}
+          </span>
+        </div>
+        {!item.correct && (
+          <div className="p-2 rounded-lg bg-success-50/60 dark:bg-success-950/20 border border-success-200/60 dark:border-success-800/40">
+            <span className="text-success-600 dark:text-success-400 text-[10px] uppercase font-semibold block">Correct Answer:</span>
+            <span className="font-medium text-success-800 dark:text-success-200">
+              {item.correctAnswer}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {item.explanation && (
+        <p className="flex items-start gap-1.5 text-xs text-ink-600 dark:text-ink-400 pt-1">
+          <Lightbulb size={13} className="mt-0.5 shrink-0 text-[#6542C5] dark:text-[#B59AF7]" />
+          <span>{item.explanation}</span>
+        </p>
+      )}
     </div>
   );
 }

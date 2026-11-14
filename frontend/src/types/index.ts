@@ -71,6 +71,10 @@ export interface StudySession {
   conceptsTotal: number;
   conceptsDone: number;
   completedAt?: string;
+  attemptsCount?: number;
+  bestScore?: number;
+  lastTestStatus?: 'passed' | 'failed' | 'not_taken';
+  lastAttemptAt?: string;
 }
 
 export interface StudyPlan {
@@ -126,8 +130,13 @@ export interface Achievement {
   title: string;
   description: string;
   unlocked: boolean;
+  unlockedAt?: string;
   progress?: number;
   goal?: number;
+  category?: 'assessments' | 'streak' | 'study' | 'coding' | 'interviews' | 'community' | string;
+  rarity?: 'common' | 'rare' | 'epic' | 'legendary' | string;
+  xpReward?: number;
+  howToEarn?: string;
 }
 
 export interface SessionAssessmentQuestion {

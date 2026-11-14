@@ -9,6 +9,7 @@ import { getClientForUser } from '../lib/gemini.js';
 import { config } from '../config.js';
 import { getDateKeyForTimezone } from '../lib/timezone.js';
 import { userStore } from '../lib/users.js';
+import { getDb } from '../lib/db.js';
 import {
   preCheckAnswer,
   buildStrictRubricPrompt,
@@ -52,6 +53,11 @@ featuresRouter.post('/mistakes', async (req: AuthedRequest, res: Response) => {
 
 featuresRouter.post('/mistakes/:id/resolve', async (req: AuthedRequest, res: Response) => {
   const userId = req.userId!;
+  const mistake = await learningStore.getMistake(userId, req.params.id);
+  if (mistake?.resolved) {
+    res.json({ data: { success: true, alreadyResolved: true } });
+    return;
+  }
   const success = await learningStore.resolveMistake(userId, req.params.id);
   if (success) {
     const user = await userStore.findById(userId);
@@ -63,9 +69,18 @@ featuresRouter.post('/mistakes/:id/resolve', async (req: AuthedRequest, res: Res
       today,
       1,
       { mistakeId: req.params.id },
-      `mistake:${req.params.id}:${today}`
+      `mistake:${req.params.id}`
     );
     emitToUser(userId, 'stats:invalidate', { reason: 'mistake_resolved', mistakeId: req.params.id });
+  }
+  res.json({ data: { success, alreadyResolved: false } });
+});
+
+featuresRouter.post('/mistakes/:id/reopen', async (req: AuthedRequest, res: Response) => {
+  const userId = req.userId!;
+  const success = await learningStore.reopenMistake(userId, req.params.id);
+  if (success) {
+    emitToUser(userId, 'stats:invalidate', { reason: 'mistake_reopened', mistakeId: req.params.id });
   }
   res.json({ data: { success } });
 });
@@ -504,4 +519,40 @@ featuresRouter.get('/interview/reports', async (req: AuthedRequest, res: Respons
   const userId = req.userId!;
   const reports = await learningStore.listInterviewReports(userId);
   res.json({ data: reports });
+});
+
+// -------------------------------------------------------------
+// NOTIFICATIONS
+// -------------------------------------------------------------
+featuresRouter.get('/notifications', async (req: AuthedRequest, res: Response) => {
+  try {
+    const db = await getDb();
+    const notifications = await db
+      .collection('notifications')
+      .find({ userId: req.userId! })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .toArray();
+
+    const formatted = notifications.map((n: any) => ({
+      id: String(n._id),
+      message: n.message,
+      createdAt: n.createdAt,
+      read: !!n.read,
+    }));
+
+    res.json({ data: formatted });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err?.message || 'Failed to fetch notifications' } });
+  }
+});
+
+featuresRouter.post('/notifications/mark-read', async (req: AuthedRequest, res: Response) => {
+  try {
+    const db = await getDb();
+    await db.collection('notifications').updateMany({ userId: req.userId! }, { $set: { read: true } });
+    res.json({ data: { success: true } });
+  } catch (err: any) {
+    res.status(500).json({ error: { message: err?.message || 'Failed to mark notifications read' } });
+  }
 });

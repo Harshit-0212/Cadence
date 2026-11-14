@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Layers,
   RotateCcw,
@@ -36,6 +36,7 @@ interface Flashcard {
   leechCount?: number;
   distractors?: string[];
   clozeText?: string;
+  sourceDocId?: string;
   lastReviewType?: 'flip' | 'mcq' | 'cloze' | 'type';
   interval?: number;
   nextReviewDate?: string;
@@ -43,8 +44,10 @@ interface Flashcard {
 
 export function Flashcards() {
   const { showToast } = useToast();
-  const [cards, setCards] = useState<Flashcard[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedDocId = searchParams.get('docId') || 'all';
 
+  const [cards, setCards] = useState<Flashcard[]>([]);
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -76,8 +79,9 @@ export function Flashcards() {
     async function loadCards() {
       try {
         const due = await learningFeaturesService.getDueFlashcards();
+        let loadedAll: Flashcard[] = [];
         if (due && due.length > 0) {
-          const loaded: Flashcard[] = due.map((d: any) => ({
+          loadedAll = due.map((d: any) => ({
             id: d.id || d._id,
             front: d.front,
             back: d.back,
@@ -88,16 +92,15 @@ export function Flashcards() {
             leechCount: d.leechCount || 0,
             distractors: d.distractors || [],
             clozeText: d.clozeText,
+            sourceDocId: d.sourceDocId,
             lastReviewType: d.lastReviewType || 'flip',
             interval: d.interval || 1,
             nextReviewDate: d.nextReviewDate,
           }));
-          setCards(loaded);
-          setQueue(loaded);
         } else {
           const all = await learningFeaturesService.getAllFlashcards();
           if (all && all.length > 0) {
-            const loadedAll: Flashcard[] = all.map((d: any) => ({
+            loadedAll = all.map((d: any) => ({
               id: d.id || d._id,
               front: d.front,
               back: d.back,
@@ -108,26 +111,50 @@ export function Flashcards() {
               leechCount: d.leechCount || 0,
               distractors: d.distractors || [],
               clozeText: d.clozeText,
+              sourceDocId: d.sourceDocId,
               lastReviewType: d.lastReviewType || 'flip',
               interval: d.interval || 1,
               nextReviewDate: d.nextReviewDate,
             }));
-            setCards(loadedAll);
-            setQueue(loadedAll);
-          } else {
-            setCards([]);
-            setQueue([]);
           }
         }
+        setCards(loadedAll);
       } catch {
         setCards([]);
-        setQueue([]);
       }
       setStartTime(Date.now());
     }
     loadCards();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Filter queue whenever cards or selectedDocId changes
+  useEffect(() => {
+    const filtered =
+      selectedDocId === 'all'
+        ? cards
+        : cards.filter((c) => c.sourceDocId === selectedDocId);
+    setQueue(filtered);
+    setCurrentIndex(0);
+    setCompleted(false);
+    setIsFlipped(false);
+  }, [cards, selectedDocId]);
+
+  // Distinct decks per document
+  const decks = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>();
+    for (const c of cards) {
+      if (c.sourceDocId) {
+        const existing = map.get(c.sourceDocId) || {
+          id: c.sourceDocId,
+          name: c.topic && c.topic !== 'General' ? c.topic : (c.subject || 'Document Deck'),
+          count: 0,
+        };
+        existing.count++;
+        map.set(c.sourceDocId, existing);
+      }
+    }
+    return Array.from(map.values());
+  }, [cards]);
 
   const currentCard = queue[currentIndex];
 
@@ -271,6 +298,35 @@ export function Flashcards() {
             </div>
           }
         />
+
+        {/* Deck Selector Tabs */}
+        {decks.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-2">
+            <button
+              onClick={() => setSearchParams({})}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+                selectedDocId === 'all'
+                  ? 'bg-[#6542C5] text-white shadow-sm'
+                  : 'bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]'
+              }`}
+            >
+              All Decks ({cards.length})
+            </button>
+            {decks.map((deck) => (
+              <button
+                key={deck.id}
+                onClick={() => setSearchParams({ docId: deck.id })}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+                  selectedDocId === deck.id
+                    ? 'bg-[#6542C5] text-white shadow-sm'
+                    : 'bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]'
+                }`}
+              >
+                {deck.name} ({deck.count})
+              </button>
+            ))}
+          </div>
+        )}
 
         {completed ? (
           <div className="space-y-6">
@@ -522,7 +578,7 @@ export function Flashcards() {
                 <span className="block text-[11px] font-semibold text-[var(--text-muted)] mb-2 text-center">
                   Rate your recall difficulty (SM-2):
                 </span>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <Button variant="danger" size="sm" onClick={() => handleRate(1)}>
                     1: Again
                   </Button>
@@ -551,7 +607,7 @@ export function Flashcards() {
               </p>
             </div>
             <div className="pt-2">
-              <Link to="/app/documents">
+              <Link to="/app/library">
                 <Button variant="primary" size="sm">
                   Generate from Document
                 </Button>

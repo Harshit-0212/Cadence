@@ -35,8 +35,7 @@ export type LearningActionType =
   | 'coding_accepted'
   | 'comprehension_drill'
   | 'quiz_completed'
-  | 'curriculum_step'
-  | 'tutor_session';
+  | 'curriculum_step';
 
 const COLLECTION = 'user_gamification';
 
@@ -207,9 +206,6 @@ export const gamificationStore = {
       case 'curriculum_step':
         xpGained = 15;
         break;
-      case 'tutor_session':
-        xpGained = 10;
-        break;
     }
 
     // --- Streak calculation ---
@@ -341,7 +337,6 @@ export const gamificationStore = {
         comprehension_drill: 'session',
         quiz_completed: 'mock_test',
         curriculum_step: 'session',
-        tutor_session: 'tutor',
       };
       const actType = typeMap[action] || 'session';
       await activityStore.recordActivity(userId, actType, userLocalDate, xpGained, { action }, fullKey);

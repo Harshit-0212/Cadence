@@ -71,16 +71,21 @@ export const learningFeaturesService = {
   // Mistakes
   async getMistakes(): Promise<MistakeRecord[]> {
     const res = (await fetchApi('/mistakes')) as any;
-    return res.data?.mistakes || [];
+    if (Array.isArray(res)) return res;
+    return res?.data?.mistakes || res?.mistakes || res?.data || [];
   },
   async resolveMistake(id: string): Promise<void> {
     await fetchApi(`/mistakes/${id}/resolve`, { method: 'POST' });
+  },
+  async reopenMistake(id: string): Promise<void> {
+    await fetchApi(`/mistakes/${id}/reopen`, { method: 'POST' });
   },
 
   // Flashcards
   async getDueFlashcards(): Promise<FlashcardRecord[]> {
     const res = (await fetchApi('/flashcards/due')) as any;
-    return res.data?.cards || [];
+    if (Array.isArray(res)) return res;
+    return res?.data?.cards || res?.cards || res?.data || [];
   },
   async createFlashcard(card: {
     front: string;
@@ -94,11 +99,12 @@ export const learningFeaturesService = {
       method: 'POST',
       body: JSON.stringify(card),
     })) as any;
-    return res.data;
+    return res?.data ?? res;
   },
   async getAllFlashcards(): Promise<any[]> {
     const res = (await fetchApi('/flashcards/all')) as any;
-    return res.data || [];
+    if (Array.isArray(res)) return res;
+    return res?.data?.cards || res?.cards || res?.data || [];
   },
   async generateFlashcardsForDocument(payload: {
     documentId: string;
@@ -110,7 +116,7 @@ export const learningFeaturesService = {
       method: 'POST',
       body: JSON.stringify(payload),
     })) as any;
-    return res.data;
+    return res?.data ?? res ?? { cards: [], created: 0, skipped: 0 };
   },
   async reviewFlashcard(id: string, rating: number, reviewType?: 'flip' | 'mcq' | 'cloze' | 'type'): Promise<void> {
     await fetchApi(`/flashcards/${id}/review`, {
@@ -123,21 +129,22 @@ export const learningFeaturesService = {
   async getCalendarEvents(from?: string, to?: string): Promise<CalendarEventRecord[]> {
     const query = from && to ? `?from=${from}&to=${to}` : '';
     const res = (await fetchApi(`/calendar${query}`)) as any;
-    return res.data?.events || (Array.isArray(res.data) ? res.data : []);
+    if (Array.isArray(res)) return res;
+    return res?.events || res?.data?.events || (Array.isArray(res?.data) ? res.data : []);
   },
   async createCalendarEvent(event: Partial<CalendarEventRecord>): Promise<CalendarEventRecord> {
     const res = (await fetchApi('/calendar', {
       method: 'POST',
       body: JSON.stringify(event),
     })) as any;
-    return res.data?.event || res.data;
+    return res?.event || res?.data?.event || (res?.data ?? res);
   },
   async updateCalendarEvent(id: string, patch: Partial<CalendarEventRecord>): Promise<CalendarEventRecord> {
     const res = (await fetchApi(`/calendar/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     })) as any;
-    return res.data?.event || res.data;
+    return res?.event || res?.data?.event || (res?.data ?? res);
   },
   async deleteCalendarEvent(id: string): Promise<void> {
     await fetchApi(`/calendar/${id}`, { method: 'DELETE' });
@@ -154,11 +161,12 @@ export const learningFeaturesService = {
       method: 'POST',
       body: JSON.stringify(payload),
     })) as any;
-    return res.data?.report || res.data;
+    return res?.report || res?.data?.report || (res?.data ?? res);
   },
   async getInterviewReports(): Promise<InterviewReportRecord[]> {
     const res = (await fetchApi('/interview/reports')) as any;
-    return res.data?.reports || (Array.isArray(res.data) ? res.data : []);
+    if (Array.isArray(res)) return res;
+    return res?.reports || res?.data?.reports || (Array.isArray(res?.data) ? res.data : []);
   },
 };
 

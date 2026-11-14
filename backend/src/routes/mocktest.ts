@@ -279,5 +279,48 @@ mocktestRouter.get('/results/:id', requireAuth, async (req: AuthedRequest, res) 
     res.status(404).json({ error: { message: 'Result not found' } });
     return;
   }
-  res.json({ data: { result: found } });
+
+  // Lookup session attempt to attach full questions, user answers, and perQuestion
+  const session = found.testId ? await mockTestSessionStore.get(found.testId, req.userId!) : null;
+  const questions = session?.questions || [];
+  const userAnswers = session?.answers || {};
+
+  const perQuestion = questions.map((q) => {
+    const userAns = (userAnswers[q.id] || '').trim();
+    const correctAns = (q.correctAnswer || '').trim();
+    const isCorrect = userAns.toLowerCase() === correctAns.toLowerCase();
+    return {
+      questionId: q.id,
+      prompt: q.prompt,
+      userAnswer: userAns || 'Not Answered',
+      correctAnswer: correctAns,
+      correct: isCorrect,
+      isCorrect,
+      explanation: q.explanation || '',
+      topic: q.topic || 'General',
+    };
+  });
+
+  res.json({
+    data: {
+      result: {
+        ...found,
+        testId: found.id,
+        attemptId: found.testId,
+        test: session
+          ? {
+              id: session.id,
+              subject: session.subject,
+              config: { subject: session.subject, topics: [], difficulty: 'mixed', numQuestions: session.questions.length },
+              questions: session.questions,
+              createdAt: new Date(session.createdAt).toISOString(),
+              timeLimitSeconds: session.questions.length * 90,
+            }
+          : undefined,
+        questions,
+        userAnswers,
+        perQuestion,
+      },
+    },
+  });
 });

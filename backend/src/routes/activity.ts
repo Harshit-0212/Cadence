@@ -66,7 +66,6 @@ activityRouter.post('/record', async (req: AuthedRequest, res: Response) => {
     'interview',
     'flashcard',
     'mistake_retry',
-    'tutor',
     'focus',
     'focus_minutes',
     'document',
@@ -92,13 +91,12 @@ activityRouter.post('/record', async (req: AuthedRequest, res: Response) => {
       ? localDate
       : getDateKeyForTimezone(new Date(), effectiveTz);
 
-  const defaultPoints: Record<ActivityEventType, number> = {
+  const defaultPoints: Partial<Record<ActivityEventType, number>> = {
     session: 3,
     mock_test: 4,
     interview: 4,
     flashcard: 1,
     mistake_retry: 1,
-    tutor: 1,
     focus: 1,
     focus_minutes: 1,
     document: 1,
@@ -106,7 +104,7 @@ activityRouter.post('/record', async (req: AuthedRequest, res: Response) => {
     coding_submission: 3,
   };
 
-  const finalPoints = typeof points === 'number' && points >= 0 ? points : defaultPoints[type as ActivityEventType];
+  const finalPoints = typeof points === 'number' && points >= 0 ? points : (defaultPoints[type as ActivityEventType] ?? 1);
 
   const recorded = await activityStore.recordActivity(userId, type, dateKey, finalPoints, meta, eventKey);
   emitToUser(userId, 'stats:invalidate', { reason: type });

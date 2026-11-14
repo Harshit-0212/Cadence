@@ -66,8 +66,8 @@ export async function computeUserStatsSummary(userId: string, timezone?: string,
   // 1. Streak and distinct days directly from activity_events (single source of truth)
   const streakInfo = await activityStore.computeStreak(userId, userToday);
 
-  // 2. Activity events aggregation (total points, active days)
-  const activityEvents = await db.collection('activity_events').find({ userId }).toArray();
+  // 2. Activity events aggregation (total points, active days) - explicitly excludes tutor
+  const activityEvents = await db.collection('activity_events').find({ userId, type: { $ne: 'tutor' } }).toArray();
   const totalPoints = activityEvents.reduce((acc, ev) => acc + (Number(ev.points) || 0), 0);
   const activeDaysCount = streakInfo.distinctDays.length;
 

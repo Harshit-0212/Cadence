@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Check,
@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { useAppData } from '@/store/AppDataContext';
 import { useToast } from '@/store/ToastContext';
+import { StageTestModal } from '@/components/planner/StageTestModal';
 import type { DiagnosticEvaluation, SessionAssessmentQuestion, StudySession } from '@/types';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -51,6 +52,7 @@ export function StudyPlan() {
   const [adjusting, setAdjusting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [rescheduleTarget, setRescheduleTarget] = useState<StudySession | null>(null);
+  const [testTarget, setTestTarget] = useState<StudySession | null>(null);
   const [newDate, setNewDate] = useState('');
 
   const handleReset = async () => {
@@ -201,7 +203,7 @@ export function StudyPlan() {
                 >
                   <SessionRow
                     session={session}
-                    onComplete={() => handleComplete(session.id)}
+                    onTakeTest={() => setTestTarget(session)}
                     onReschedule={() => {
                       setRescheduleTarget(session);
                       setNewDate(session.date.slice(0, 10));
@@ -213,6 +215,17 @@ export function StudyPlan() {
           </div>
         </div>
       </div>
+
+      <StageTestModal
+        session={testTarget}
+        open={!!testTarget}
+        onClose={() => setTestTarget(null)}
+        onPassed={async () => {
+          showToast('Stage test passed! Day completed and next stage unlocked.', 'success');
+          setTestTarget(null);
+          window.location.reload();
+        }}
+      />
 
       <Modal open={!!rescheduleTarget} onClose={() => setRescheduleTarget(null)} title="Reschedule session" size="sm">
         {rescheduleTarget && (
@@ -260,11 +273,11 @@ function SummaryCard({ icon: Icon, label, value }: { icon: typeof Target; label:
 
 function SessionRow({
   session,
-  onComplete,
+  onTakeTest,
   onReschedule,
 }: {
   session: StudySession;
-  onComplete: () => void;
+  onTakeTest: () => void;
   onReschedule: () => void;
 }) {
   const config = STATUS_CONFIG[session.status];
@@ -298,20 +311,23 @@ function SessionRow({
               </Badge>
               <Badge tone="accent">{session.difficulty}</Badge>
               <Badge tone="primary">{session.subject}</Badge>
+              {session.attemptsCount !== undefined && session.attemptsCount > 0 && (
+                <Badge tone={session.bestScore && session.bestScore >= 90 ? 'success' : 'warning'}>
+                  Best: {session.bestScore}% ({session.attemptsCount} {session.attemptsCount === 1 ? 'attempt' : 'attempts'})
+                </Badge>
+              )}
             </div>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex shrink-0 gap-2 items-center">
             {!isLocked && !isCompleted && (
-              <Link to="/app/session">
-                <Button size="sm">
-                  <Play size={14} /> Start
-                </Button>
-              </Link>
-            )}
-            {!isCompleted && (
-              <Button size="sm" variant="success" onClick={onComplete}>
-                <Check size={14} /> Mark done
+              <Button size="sm" variant="primary" onClick={onTakeTest}>
+                <Sparkles size={14} /> Take the test
               </Button>
+            )}
+            {isCompleted && (
+              <Badge tone="success" className="px-3 py-1.5 flex items-center gap-1 text-xs">
+                <Check size={14} /> Passed ({session.bestScore ?? 100}%)
+              </Badge>
             )}
             {!isLocked && (
               <>

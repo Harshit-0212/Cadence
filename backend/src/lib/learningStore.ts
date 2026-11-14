@@ -105,11 +105,25 @@ export const learningStore = {
     return db.collection<MistakeRecord>('mistakes').find(query).sort({ createdAt: -1 }).toArray();
   },
 
+  async getMistake(userId: string, id: string): Promise<MistakeRecord | null> {
+    const db = await getDb();
+    return db.collection<MistakeRecord>('mistakes').findOne({ id, userId });
+  },
+
   async resolveMistake(userId: string, id: string): Promise<boolean> {
     const db = await getDb();
     const res = await db.collection<MistakeRecord>('mistakes').updateOne(
       { id, userId },
       { $set: { resolved: true, resolvedAt: new Date().toISOString() }, $inc: { retriesCount: 1 } }
+    );
+    return res.matchedCount > 0;
+  },
+
+  async reopenMistake(userId: string, id: string): Promise<boolean> {
+    const db = await getDb();
+    const res = await db.collection<MistakeRecord>('mistakes').updateOne(
+      { id, userId },
+      { $set: { resolved: false }, $unset: { resolvedAt: '' } }
     );
     return res.matchedCount > 0;
   },

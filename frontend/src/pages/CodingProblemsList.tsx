@@ -128,6 +128,36 @@ export function CodingProblemsList() {
     }
   };
 
+  const getStatusChip = (status?: string, lastSubmittedAt?: string) => {
+    if (status === 'solved') {
+      return (
+        <span
+          title={lastSubmittedAt ? `Solved on ${new Date(lastSubmittedAt).toLocaleString()}` : 'Solved'}
+          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
+        >
+          <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400" />
+          Solved
+        </span>
+      );
+    }
+    if (status === 'submitted') {
+      return (
+        <span
+          title={lastSubmittedAt ? `Last submitted: ${new Date(lastSubmittedAt).toLocaleString()}` : 'Submitted'}
+          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
+        >
+          <Clock size={12} className="text-amber-600 dark:text-amber-400" />
+          Submitted
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-400 border border-gray-200 dark:border-slate-700">
+        Not attempted
+      </span>
+    );
+  };
+
   return (
     <AppLayout>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -278,8 +308,11 @@ export function CodingProblemsList() {
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    {getDifficultyBadge(problem.difficulty)}
-                    <span className="text-[11px] font-medium text-gray-400 dark:text-slate-500 flex items-center gap-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {getDifficultyBadge(problem.difficulty)}
+                      {getStatusChip(problem.status, problem.lastSubmittedAt)}
+                    </div>
+                    <span className="text-[11px] font-medium text-gray-400 dark:text-slate-500 flex items-center gap-1 shrink-0">
                       <Layers className="w-3 h-3" /> {problem.topic}
                     </span>
                   </div>
@@ -315,6 +348,11 @@ export function CodingProblemsList() {
                       <HardDrive className="w-3.5 h-3.5 text-gray-400" />
                       {problem.executionLimits.memoryLimitMb}MB
                     </span>
+                    {problem.lastSubmittedAt && (
+                      <span className="hidden sm:inline text-[10px] text-gray-400 font-mono">
+                        {new Date(problem.lastSubmittedAt).toLocaleDateString()}
+                      </span>
+                    )}
                   </div>
 
                   <span className="text-[#6542C5] dark:text-[#B59AF7] font-semibold flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">

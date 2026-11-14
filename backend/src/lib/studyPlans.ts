@@ -29,6 +29,10 @@ export interface StoredStudySession {
   conceptsDone: number;
   completedAt?: string;
   reminderSentAt?: string;
+  attemptsCount?: number;
+  bestScore?: number;
+  lastTestStatus?: 'passed' | 'failed' | 'not_taken';
+  lastAttemptAt?: string;
 }
 
 async function plansCollection() {

@@ -98,11 +98,34 @@ function PageTransitionWrapper({ children }: { children: React.ReactNode }) {
 }
 
 function NotFoundOrRedirect() {
-  const { user } = useAuth();
-  if (user) {
-    return <Navigate to="/app" replace />;
-  }
-  return <Navigate to="/" replace />;
+  const location = useLocation();
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6 bg-[#FAF7F2] dark:bg-[#121016] text-[#211D28] dark:text-[#F5F0E8]">
+      <div className="max-w-md w-full bg-white dark:bg-[#1E1B26] border border-[#E4DEC9] dark:border-white/10 rounded-2xl p-6 shadow-xl space-y-4 text-center">
+        <div className="w-12 h-12 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center mx-auto text-lg font-bold">
+          404
+        </div>
+        <div className="space-y-1">
+          <h2 className="text-lg font-bold">Page Not Found</h2>
+          <p className="text-xs text-[#6F677A] dark:text-[#A79FA4]">
+            The requested path does not exist:
+          </p>
+          <p className="font-mono text-xs px-2 py-1 bg-stone-100 dark:bg-white/5 rounded text-purple-600 dark:text-purple-400 break-all">
+            {location.pathname}
+          </p>
+        </div>
+        <div className="pt-2">
+          <a
+            href="/app"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#6542C5] hover:bg-[#5233A8] text-white text-xs font-semibold shadow-sm transition-all"
+          >
+            Back to Dashboard
+          </a>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AppRoutes() {
@@ -181,6 +204,14 @@ function AppRoutes() {
           />
           <Route
             path="/app/assessments/results/:attemptId"
+            element={
+              <ProtectedRoute>
+                <Assessments />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/assessments/results/:attemptId"
             element={
               <ProtectedRoute>
                 <Assessments />
@@ -314,6 +345,10 @@ function AppRoutes() {
                 <DocumentLibrary />
               </ProtectedRoute>
             }
+          />
+          <Route
+            path="/app/documents"
+            element={<Navigate to="/app/library" replace />}
           />
           <Route
             path="/app/interview"

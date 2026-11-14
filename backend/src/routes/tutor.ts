@@ -5,8 +5,6 @@ import { searchEducationalVideo } from '../lib/youtube.js';
 import { chatStore } from '../lib/chatHistory.js';
 import { conversationStore, DEFAULT_CONVERSATION_TITLE } from '../lib/conversationStore.js';
 import { extractDocument, ExtractionError } from '../lib/extractText.js';
-import { activityStore } from '../lib/activityStore.js';
-import { emitToUser } from '../lib/socket.js';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 
 export const tutorRouter = Router();
@@ -172,17 +170,6 @@ tutorRouter.post('/chat', requireAuth, (req: AuthedRequest, res) => {
         await conversationStore.rename(conversationId, req.userId!, title);
       }
 
-      // Record tutor activity event in same request (max 3/day handled by activityStore)
-      const dateKey = new Date().toISOString().slice(0, 10);
-      await activityStore.recordActivity(
-        req.userId!,
-        'tutor',
-        dateKey,
-        1,
-        { conversationId, messagePreview: text.slice(0, 30) },
-        `tutor:${conversationId}:${Date.now()}`
-      );
-      emitToUser(req.userId!, 'stats:invalidate', { reason: 'tutor_chat' });
       await conversationStore.touch(conversationId, req.userId!, truncateTitle(content, 80));
 
       res.json({ data: { content, video, title } });

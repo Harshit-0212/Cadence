@@ -7,40 +7,50 @@ import {
   Brain,
   RefreshCw,
   Compass,
-  GraduationCap,
   Flame,
-  Shield,
   CheckCircle2,
   Clock,
   Play,
+  Layers,
+  Calendar,
+  BrainCircuit,
+  AlertCircle,
+  AlertTriangle,
+  Zap,
+  BookOpen,
+  FileText,
+  MessageSquare,
+  Timer,
+  ChevronRight,
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { PageContainer, CardGrid } from '@/components/layout/PageContainer';
 import { useAuth } from '@/store/AuthContext';
 import { useAppData } from '@/store/AppDataContext';
-import { TodaysPlanSection } from '@/components/dashboard/TodaysPlanSection';
-import { LearningProgressSection } from '@/components/dashboard/LearningProgressSection';
-import { MyCoursesSection } from '@/components/dashboard/MyCoursesSection';
-import { RecommendedSection } from '@/components/dashboard/RecommendedSection';
-import { AIInsightCard } from '@/components/dashboard/AIInsightCard';
-import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
-import { SpotlightCard } from '@/components/ui/SpotlightCard';
-import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
-import { ProgressRing } from '@/components/ui/ProgressRing';
-import { Reveal, Stagger } from '@/components/ui/Reveal';
-import { ConfettiCanvas } from '@/components/ui/ConfettiCanvas';
-import { ActivityHeatmap } from '@/components/ui/ActivityHeatmap';
 import { useStats } from '@/store/StatsContext';
 import { mockTestStore } from '@/store/MockTestStore';
 import { learningFeaturesService } from '@/services/learningFeaturesService';
-import { Layers, Calendar, BrainCircuit, AlertCircle } from 'lucide-react';
+import { activityService, type ActivityDayItem } from '@/services/activityService';
+import { Card, CardHeader } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
+import { SpotlightCard } from '@/components/ui/SpotlightCard';
+import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
+import { Reveal, Stagger } from '@/components/ui/Reveal';
+import { ConfettiCanvas } from '@/components/ui/ConfettiCanvas';
+import { ActivityHeatmap } from '@/components/ui/ActivityHeatmap';
+import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
 
 export function Dashboard() {
   const { user } = useAuth();
   const { plan, progress, weakTopics, isReady, autoAdjustPlan } = useAppData();
   const { stats, error: statsError, refreshStats } = useStats();
   const [activeTest, setActiveTest] = useState<ReturnType<typeof mockTestStore.getActiveTest>>(null);
-  const [nextCalendarEvent, setNextCalendarEvent] = useState<string>('Upcoming Study Session');
+  const [nextCalendarEvent, setNextCalendarEvent] = useState<{ title: string; date?: string } | null>(null);
+  const [recentActivities, setRecentActivities] = useState<ActivityDayItem[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(true);
 
+  // Check ongoing mock test
   useEffect(() => {
     const saved = mockTestStore.getActiveTest();
     if (saved && saved.timerEndsAt > Date.now()) {
@@ -50,36 +60,61 @@ export function Dashboard() {
     }
   }, []);
 
+  // Fetch real next calendar event
   useEffect(() => {
-    learningFeaturesService.getCalendarEvents().then((evs) => {
-      if (evs && evs.length > 0) {
-        setNextCalendarEvent(evs[0].title);
-      } else if (plan?.sessions?.length) {
-        const next = plan.sessions.find((s) => s.status === 'upcoming');
-        if (next) setNextCalendarEvent(next.topic);
-      }
-    }).catch(() => {});
+    learningFeaturesService
+      .getCalendarEvents()
+      .then((evs) => {
+        if (evs && evs.length > 0) {
+          setNextCalendarEvent({ title: evs[0].title, date: evs[0].date });
+        } else if (plan?.sessions?.length) {
+          const next = plan.sessions.find((s) => s.status === 'upcoming');
+          if (next) setNextCalendarEvent({ title: next.topic, date: next.date });
+        } else {
+          setNextCalendarEvent(null);
+        }
+      })
+      .catch(() => setNextCalendarEvent(null));
   }, [plan]);
+
+  // Fetch real recent activity events
+  useEffect(() => {
+    activityService
+      .getActivity()
+      .then((res) => {
+        const dailyData = res?.dailyData || {};
+        const allItems: ActivityDayItem[] = [];
+        Object.values(dailyData).forEach((d) => {
+          if (Array.isArray(d.items)) allItems.push(...d.items);
+        });
+        allItems.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        setRecentActivities(allItems.slice(0, 6));
+      })
+      .catch(() => setRecentActivities([]))
+      .finally(() => setLoadingActivities(false));
+  }, []);
 
   const firstName = user?.name ? user.name.split(' ')[0] : 'Learner';
 
   const todaySession = useMemo(
     () =>
       plan?.sessions.find((s) => s.status === 'in-progress') ??
-      plan?.sessions.find((s) => s.status === 'upcoming'),
+      plan?.sessions.find((s) => s.status === 'upcoming') ??
+      plan?.sessions[0],
     [plan],
   );
 
   const hasMissed = plan?.sessions.some((s) => s.status === 'missed') ?? false;
-
-  // Single source of truth for completion
   const overallPercent = plan?.completionPercent ?? progress?.overallCompletion ?? 0;
   const isPlanCompleted = overallPercent >= 100;
 
-  // Single Source of Truth for streak
+  // Single Source of Truth metrics
   const streakDays = stats?.currentStreak ?? 0;
   const dueCardsCount = stats?.flashcardsDue ?? 0;
+  const unresolvedMistakes = stats?.mistakesUnresolved ?? 0;
   const lastInterviewScore = stats?.interviewAverageScore ? stats.interviewAverageScore : null;
+  const xp = stats?.xp ?? 0;
+  const level = stats?.level ?? Math.floor(xp / 500) + 1;
 
   if (!isReady) {
     return (
@@ -89,157 +124,186 @@ export function Dashboard() {
     );
   }
 
+  // Determine stage test status on current planner session
+  const getTestStatusBadge = () => {
+    if (!todaySession) {
+      return <Badge tone="neutral">No Stage Active</Badge>;
+    }
+    if (todaySession.status === 'completed' || todaySession.lastTestStatus === 'passed') {
+      return (
+        <Badge tone="success" className="flex items-center gap-1 font-semibold">
+          <CheckCircle2 size={12} /> Test Passed ({todaySession.bestScore || 100}%)
+        </Badge>
+      );
+    }
+    if (todaySession.lastTestStatus === 'failed') {
+      return (
+        <Badge tone="warning" className="flex items-center gap-1 font-semibold">
+          <AlertTriangle size={12} /> Test Failed (Best: {todaySession.bestScore || 0}%)
+        </Badge>
+      );
+    }
+    return (
+      <Badge tone="neutral" className="flex items-center gap-1 font-semibold">
+        <Clock size={12} /> Test Not Taken
+      </Badge>
+    );
+  };
+
   return (
     <AppLayout>
       <ConfettiCanvas active={isPlanCompleted} />
 
-      <div className="space-y-6">
+      <PageContainer maxWidth="7xl">
+        {/* Onboarding Callout if no study plan exists */}
         {!plan && (
-          <div className="rounded-2xl border border-[#6542C5]/30 bg-[#F5F3FD] dark:bg-[#B59AF7]/10 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="rounded-2xl border border-[#6542C5]/30 bg-[#F5F3FD] dark:bg-[#B59AF7]/10 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-xl bg-[#6542C5]/20 text-[#6542C5] dark:text-[#B59AF7] flex items-center justify-center shrink-0">
-                <Sparkles size={17} />
+              <div className="h-10 w-10 rounded-xl bg-[#6542C5]/20 text-[#6542C5] dark:text-[#B59AF7] flex items-center justify-center shrink-0">
+                <Sparkles size={20} />
               </div>
               <div>
-                <h4 className="font-space text-xs font-bold uppercase tracking-wider text-[#6542C5] dark:text-[#B59AF7]">
+                <h4 className="font-display text-sm font-bold text-[#6542C5] dark:text-[#B59AF7]">
                   Personalize Your Learning Goal
                 </h4>
-                <p className="text-xs text-[#5F5668] dark:text-[#B8AFBE] mt-0.5">
-                  Set target exam dates and daily hours to auto-generate adaptive study roadmaps.
+                <p className="text-xs text-ink-500 dark:text-ink-400 mt-0.5">
+                  Set target exam dates and daily hours to auto-generate adaptive study roadmaps with verification tests.
                 </p>
               </div>
             </div>
             <Link to="/app/plan">
-              <button className="px-3.5 py-1.5 rounded-xl bg-[#6542C5] hover:bg-[#51329F] text-white text-xs font-bold transition-colors shrink-0">
+              <Button size="sm" variant="primary" className="shrink-0">
                 Create Study Plan
-              </button>
+              </Button>
             </Link>
           </div>
         )}
+
         {/* Welcome Header */}
         <Reveal variant="fade-up">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-[#D8D0C5] dark:border-white/10 pb-5">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-ink-200 dark:border-ink-800 pb-5">
             <div>
               <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#6542C5] dark:text-[#B59AF7]">
                 <Sparkles size={14} /> Learning Workspace
               </div>
-              <h1 className="mt-1 font-space text-2xl sm:text-3xl font-bold tracking-tight text-[#211D28] dark:text-[#F5F0E8]">
+              <h1 className="mt-1 font-display text-2xl sm:text-3xl font-bold tracking-tight text-ink-900 dark:text-ink-50">
                 Welcome back, {firstName}
               </h1>
-              <p className="mt-1 text-sm text-[#5F5668] dark:text-[#B8AFBE]">
+              <p className="mt-1 text-sm text-ink-500 dark:text-ink-400">
                 {todaySession
-                  ? `Today's target: ${todaySession.topic} (~${todaySession.estimatedMinutes} mins)`
+                  ? `Day ${todaySession.day}: ${todaySession.topic} (~${todaySession.estimatedMinutes} mins)`
                   : 'All sessions up to date! Great consistency.'}
               </p>
             </div>
-            <Link to="/app/journey">
-              <button className="inline-flex h-9 items-center gap-1.5 rounded-2xl bg-[#6542C5] hover:bg-[#51329F] dark:bg-[#B59AF7] dark:hover:bg-[#C6AFFB] px-4 text-xs font-bold text-white dark:text-[#141217] shadow-sm transition-colors">
-                <Compass size={14} /> Open Journey
-              </button>
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link to="/app/journey">
+                <Button size="sm" variant="outline" className="flex items-center gap-1.5">
+                  <Compass size={14} /> Open Journey
+                </Button>
+              </Link>
+              <Link to="/app/plan">
+                <Button size="sm" variant="primary" className="flex items-center gap-1.5">
+                  <BookOpen size={14} /> View Planner
+                </Button>
+              </Link>
+            </div>
           </div>
         </Reveal>
 
-        {/* Schedule Adjustment Callout */}
-        {hasMissed && (
-          <Reveal variant="fade-up">
-            <div className="rounded-2xl border border-[#DD6B20]/40 dark:border-[#F6AD55]/30 bg-[#FFF9F0] dark:bg-[#DD6B20]/10 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#FEEFD6] dark:bg-[#DD6B20]/20 text-[#DD6B20] dark:text-[#F6AD55] shrink-0">
-                  <RefreshCw size={17} />
-                </div>
-                <div>
-                  <h4 className="font-space text-xs font-bold uppercase tracking-wider text-[#DD6B20] dark:text-[#F6AD55]">
-                    Schedule adjustment recommended
-                  </h4>
-                  <p className="text-xs text-[#5F5668] dark:text-[#B8AFBE] mt-0.5">
-                    You have a pending session from earlier. Auto-adjust will rebalance your study targets.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={autoAdjustPlan}
-                className="px-3.5 py-1.5 rounded-xl bg-[#DD6B20] hover:bg-[#C05621] text-white text-xs font-bold transition-colors shrink-0"
-              >
-                Auto-Adjust Schedule
-              </button>
-            </div>
-          </Reveal>
-        )}
-
-        {/* Active Mock Test Resume Banner */}
+        {/* Resume In-Progress Test Banner */}
         {activeTest && (
           <Reveal variant="fade-up">
-            <div className="rounded-2xl border border-[#6542C5]/30 dark:border-[#B59AF7]/30 bg-[#F5F3FD] dark:bg-[#B59AF7]/10 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/20 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#6542C5]/20 text-[#6542C5] dark:text-[#B59AF7] shrink-0">
-                  <Play size={17} />
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/20 text-[#6542C5] dark:text-[#B59AF7] shrink-0">
+                  <Play size={18} />
                 </div>
                 <div>
-                  <h4 className="font-space text-xs font-bold uppercase tracking-wider text-[#6542C5] dark:text-[#B59AF7]">
+                  <h4 className="font-display text-sm font-bold text-[#6542C5] dark:text-[#B59AF7]">
                     Mock Test In Progress: {activeTest.subject}
                   </h4>
-                  <p className="text-xs text-[#5F5668] dark:text-[#B8AFBE] mt-0.5">
-                    You have an ongoing test. Your answers and timer are saved.
+                  <p className="text-xs text-ink-500 dark:text-ink-400 mt-0.5">
+                    You have an ongoing test attempt. Your answers and timer are preserved.
                   </p>
                 </div>
               </div>
               <Link to="/app/assessments">
-                <button className="px-3.5 py-1.5 rounded-xl bg-[#6542C5] hover:bg-[#51329F] dark:bg-[#B59AF7] dark:hover:bg-[#C6AFFB] text-white dark:text-[#141217] text-xs font-bold transition-colors shrink-0 flex items-center gap-1.5">
+                <Button size="sm" variant="primary" className="shrink-0 flex items-center gap-1.5">
                   <Play size={13} /> Resume Test
-                </button>
+                </Button>
               </Link>
             </div>
           </Reveal>
         )}
 
-        {/* Stats Error Notification with Retry */}
+        {/* Schedule Adjustment Callout */}
+        {hasMissed && (
+          <Reveal variant="fade-up">
+            <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
+                  <RefreshCw size={18} />
+                </div>
+                <div>
+                  <h4 className="font-display text-sm font-bold text-amber-800 dark:text-amber-300">
+                    Schedule adjustment recommended
+                  </h4>
+                  <p className="text-xs text-ink-500 dark:text-ink-400 mt-0.5">
+                    You have a pending session from earlier. Auto-adjust will rebalance your study targets.
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" variant="outline" onClick={autoAdjustPlan} className="shrink-0">
+                Auto-Adjust Schedule
+              </Button>
+            </div>
+          </Reveal>
+        )}
+
+        {/* Stats Error Notification */}
         {statsError && (
-          <div className="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 p-4 flex items-center justify-between gap-3 text-red-800 dark:text-red-300">
-            <div className="flex items-center gap-2 text-xs">
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300 flex items-center justify-between">
+            <div className="flex items-center gap-2">
               <AlertCircle size={15} />
               <span>Could not refresh real-time stats: {statsError}</span>
             </div>
-            <button
-              onClick={() => refreshStats()}
-              className="text-xs font-bold underline hover:no-underline flex items-center gap-1"
-            >
-              <RefreshCw size={12} /> Retry
+            <button onClick={() => refreshStats()} className="font-bold underline hover:no-underline">
+              Retry
             </button>
           </div>
         )}
 
         {/* ============================================================
-            12-COLUMN RESPONSIVE BENTO GRID (Phase 5)
+            12-COLUMN DENSE BENTO GRID (Cards with real data & clicks)
             ============================================================ */}
-        <Stagger className="grid grid-cols-1 md:grid-cols-12 gap-5" stagger={0.06}>
-          {/* Bento Item 1: Hero Continue Learning Card (8 cols x 2 rows) */}
-          <div className="md:col-span-8 md:row-span-2">
-            <SpotlightCard className="h-full flex flex-col justify-between bg-gradient-to-br from-[#6542C5] via-[#51329F] to-[#3E2579] text-white border-[#51329F]">
+        <CardGrid cols={12}>
+          {/* Card 1: Continue Learning Hero (Cols 8 on desktop) */}
+          <div className="col-span-12 lg:col-span-8">
+            <SpotlightCard className="h-full flex flex-col justify-between bg-gradient-to-br from-[#6542C5] via-[#51329F] to-[#3E2579] text-white border-[#51329F] p-6">
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[11px] font-bold uppercase tracking-wider font-mono">
                     <Sparkles size={13} /> Active Course
                   </span>
-                  <span className="text-xs opacity-80">
-                    {todaySession?.subject || 'Computer Science'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {getTestStatusBadge()}
+                    <span className="text-xs opacity-80">{todaySession?.subject || 'Curriculum'}</span>
+                  </div>
                 </div>
 
                 <div>
-                  <h2 className="font-space text-2xl sm:text-3xl font-bold tracking-tight">
-                    {plan?.goalTitle || 'Data Structures & Algorithms'}
+                  <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">
+                    {plan?.goalTitle || 'Personalized Study Plan'}
                   </h2>
                   <p className="mt-1 text-xs sm:text-sm opacity-85">
-                    Current Focus:{' '}
-                    <strong>{todaySession?.topic || 'Graph Traversal (BFS & DFS)'}</strong>
+                    Current Focus: <strong>{todaySession?.topic || 'Day 1 Concept Mastery'}</strong>
                   </p>
                 </div>
 
                 <div className="space-y-1.5 pt-2">
                   <div className="flex justify-between items-center text-xs opacity-90">
                     <span>Course Progress</span>
-                    <span className="font-space font-bold text-sm">
+                    <span className="font-mono font-bold text-sm">
                       <AnimatedNumber value={overallPercent} suffix="%" />
                     </span>
                   </div>
@@ -248,7 +312,7 @@ export function Dashboard() {
                       className="h-full rounded-full bg-[#F2B38C]"
                       initial={{ width: 0 }}
                       animate={{ width: `${overallPercent}%` }}
-                      transition={{ duration: 1, ease: 'easeOut' }}
+                      transition={{ duration: 0.8, ease: 'easeOut' }}
                     />
                   </div>
                   <div className="flex items-center justify-between text-[11px] opacity-75 pt-1">
@@ -256,252 +320,384 @@ export function Dashboard() {
                       <Clock size={12} /> ~{todaySession?.estimatedMinutes || 45} min estimated
                     </span>
                     <span>
-                      {(todaySession?.conceptsTotal ?? 0) > 0
-                        ? `${todaySession?.conceptsDone ?? 0} of ${todaySession?.conceptsTotal} concepts completed`
-                        : `${todaySession?.conceptsDone ?? 0} concepts completed`}
+                      Day {todaySession?.day || 1} · {todaySession?.status || 'upcoming'}
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Large CTA with dynamic completed state */}
+              {/* Action Buttons */}
               <div className="pt-6 mt-4 border-t border-white/15 flex items-center justify-between flex-wrap gap-3">
-                {isPlanCompleted ? (
-                  <Link to="/app/assessments">
-                    <button className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#F2B38C] text-[#211D28] hover:bg-[#F5BEA5] px-6 text-sm font-bold shadow-md transition-colors">
-                      <Sparkles size={16} /> Take a Mock Test
-                    </button>
-                  </Link>
-                ) : (
-                  <Link to="/app/session">
-                    <button className="inline-flex h-12 items-center gap-2 rounded-2xl bg-white text-[#51329F] hover:bg-[#F5F3FD] px-6 text-sm font-bold shadow-md transition-colors">
-                      <Play size={16} className="fill-current" /> Continue Lesson <ArrowRight size={16} />
-                    </button>
-                  </Link>
-                )}
-
+                <Link to="/app/plan">
+                  <Button variant="secondary" size="md" className="gap-2 bg-white text-[#51329F] hover:bg-slate-100 font-bold">
+                    <Play size={16} className="fill-current" /> Continue Day {todaySession?.day || 1} <ArrowRight size={16} />
+                  </Button>
+                </Link>
                 <Link to="/app/plan" className="text-xs font-semibold opacity-85 hover:opacity-100 underline">
-                  View Syllabus →
+                  View Syllabus & Verification Tests →
                 </Link>
               </div>
             </SpotlightCard>
           </div>
 
-          {/* Bento Item 2: Weak Spots Tall Card (4 cols x 2 rows) */}
-          <div className="md:col-span-4 md:row-span-2">
-            <SpotlightCard className="h-full flex flex-col justify-between">
+          {/* Card 2: Weak Spots with Practice Button (Cols 4 on desktop) */}
+          <div className="col-span-12 lg:col-span-4">
+            <SpotlightCard className="h-full flex flex-col justify-between p-5">
               <div>
-                <div className="flex items-center justify-between pb-3 border-b border-[#D8D0C5] dark:border-white/10 mb-3">
+                <div className="flex items-center justify-between pb-3 border-b border-ink-100 dark:border-ink-800 mb-3">
                   <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-xl bg-[#F2B38C]/20 text-[#D7713A] dark:text-[#F2B38C] flex items-center justify-center">
+                    <div className="h-8 w-8 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center">
                       <Brain size={16} />
                     </div>
                     <div>
-                      <h3 className="font-space text-sm font-bold text-[#211D28] dark:text-[#F5F0E8]">
+                      <h3 className="font-display text-sm font-bold text-ink-900 dark:text-ink-50">
                         Weak Spots
                       </h3>
-                      <p className="text-[10px] text-[#8A8192]">Click topic to drill</p>
+                      <p className="text-[10px] text-ink-400">Targeted quiz drill</p>
                     </div>
                   </div>
-                  <span className="text-[10px] font-bold text-[#D7713A] bg-[#FDF6F0] dark:bg-[#F2B38C]/15 px-2 py-0.5 rounded-full font-mono">
+                  <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full font-mono">
                     {weakTopics?.length || 0} Topics
                   </span>
                 </div>
 
                 <div className="space-y-2">
                   {weakTopics && weakTopics.length > 0 ? (
-                    weakTopics.map((topic) => (
-                      <Link key={topic} to="/app/assessments" className="block">
-                        <div className="p-3 rounded-2xl border border-[#D8D0C5] dark:border-white/10 bg-[#E8E1D7]/30 hover:border-[#6542C5] dark:hover:border-[#B59AF7] transition-colors flex items-center justify-between">
-                          <span className="text-xs font-semibold text-[#211D28] dark:text-[#F5F0E8] truncate">
-                            {topic}
-                          </span>
-                          <span className="text-[10px] font-bold text-[#6542C5] dark:text-[#B59AF7]">
+                    weakTopics.slice(0, 4).map((topic) => (
+                      <div
+                        key={topic}
+                        className="p-2.5 rounded-xl border border-ink-200 dark:border-ink-800 bg-ink-50/50 dark:bg-ink-900/40 flex items-center justify-between gap-2"
+                      >
+                        <span className="text-xs font-semibold text-ink-900 dark:text-ink-100 truncate">
+                          {topic}
+                        </span>
+                        <Link to={`/app/assessments?topic=${encodeURIComponent(topic)}`}>
+                          <Button size="sm" variant="outline" className="text-[10px] h-7 px-2 font-bold shrink-0">
                             Practice →
-                          </span>
-                        </div>
-                      </Link>
+                          </Button>
+                        </Link>
+                      </div>
                     ))
                   ) : (
-                    <div className="p-6 text-center text-xs text-[#8A8192] space-y-1">
-                      <CheckCircle2 size={24} className="mx-auto text-[#2F855A] dark:text-[#48BB78]" />
-                      <p className="font-semibold text-[#211D28] dark:text-[#F5F0E8]">No gaps detected!</p>
-                      <p className="text-[11px]">Keep maintaining your consistency.</p>
+                    <div className="p-6 text-center text-xs text-ink-400 space-y-1">
+                      <CheckCircle2 size={24} className="mx-auto text-emerald-500" />
+                      <p className="font-semibold text-ink-900 dark:text-ink-50">No gaps detected!</p>
+                      <p className="text-[11px]">Maintain consistency across sessions.</p>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-[#D8D0C5] dark:border-white/10">
+              <div className="pt-3 border-t border-ink-100 dark:border-ink-800 mt-3">
                 <Link to="/app/assessments">
-                  <button className="w-full py-2 rounded-xl bg-[#E8E1D7] dark:bg-[#28222F] text-xs font-bold text-[#5F5668] hover:text-[#211D28] dark:text-[#B8AFBE] dark:hover:text-white transition-colors text-center">
-                    Full Diagnostic Quiz
-                  </button>
+                  <Button variant="ghost" size="sm" className="w-full text-xs font-semibold">
+                    Open All Assessments →
+                  </Button>
                 </Link>
               </div>
             </SpotlightCard>
           </div>
 
-          {/* Bento Item 3: Daily Goal Progress Ring Tile (4 cols) */}
-          <div className="md:col-span-4">
-            <SpotlightCard className="p-5 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A8192]">Daily Goal</span>
-                <p className="font-space text-2xl font-bold text-[#211D28] dark:text-[#F5F0E8] mt-1">
-                  {todaySession ? `${todaySession.estimatedMinutes}m` : 'Done'}
-                </p>
-                <p className="text-[11px] text-[#5F5668] dark:text-[#B8AFBE] mt-0.5 truncate max-w-[140px]">
-                  {todaySession ? todaySession.topic : 'Target complete'}
-                </p>
-              </div>
-              <ProgressRing
-                value={todaySession ? Math.round((todaySession.conceptsDone / (todaySession.conceptsTotal || 10)) * 100) : 100}
-                size={76}
-                stroke={7}
-                label={`${todaySession ? todaySession.conceptsDone : 10}`}
-                sublabel="done"
-              />
-            </SpotlightCard>
-          </div>
-
-          {/* Bento Item 4: Comprehension Small Tile (4 cols) */}
-          <div className="md:col-span-4">
-            <SpotlightCard className="p-5 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A8192]">Comprehension</span>
-                <p className="font-space text-2xl font-bold text-[#211D28] dark:text-[#F5F0E8] mt-1">
-                  Stage 1 & 2
-                </p>
-                <p className="text-[11px] text-[#5F5668] dark:text-[#B8AFBE] mt-0.5">
-                  Arrays code trace ready
-                </p>
-              </div>
-              <Link to="/app/comprehension">
-                <div className="h-12 w-12 rounded-2xl bg-[#6542C5]/10 text-[#6542C5] dark:bg-[#B59AF7]/15 dark:text-[#B59AF7] flex items-center justify-center hover:scale-105 transition-transform">
-                  <GraduationCap size={22} />
+          {/* Card 3: Due Flashcards (Cols 4) */}
+          <div className="col-span-12 sm:col-span-6 lg:col-span-4">
+            <SpotlightCard className="p-5 flex flex-col justify-between h-full">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#6542C5] dark:text-[#B59AF7] flex items-center justify-center shrink-0">
+                    <Layers size={18} />
+                  </div>
+                  <div>
+                    <h4 className="font-display text-sm font-bold text-ink-900 dark:text-ink-50">
+                      Spaced Repetition
+                    </h4>
+                    <p className="text-[10px] text-ink-400">SM-2 Active Recall</p>
+                  </div>
                 </div>
+                <Badge tone={dueCardsCount > 0 ? 'primary' : 'neutral'}>
+                  {dueCardsCount} Due
+                </Badge>
+              </div>
+
+              <div className="my-4">
+                <p className="font-display text-2xl font-bold text-ink-900 dark:text-ink-50">
+                  <AnimatedNumber value={dueCardsCount} suffix=" cards" />
+                </p>
+                <p className="text-xs text-ink-500 mt-0.5">
+                  {dueCardsCount > 0
+                    ? 'Scheduled for optimal memory retention.'
+                    : 'All caught up! No cards currently due.'}
+                </p>
+              </div>
+
+              <Link to="/app/flashcards">
+                <Button size="sm" variant={dueCardsCount > 0 ? 'primary' : 'outline'} className="w-full text-xs font-bold">
+                  {dueCardsCount > 0 ? `Study ${dueCardsCount} Cards` : 'Open Flashcards Deck'} →
+                </Button>
               </Link>
             </SpotlightCard>
           </div>
 
-          {/* Bento Item 5: Streak + Gamification Wide Card with Mini Heatmap (4 cols) */}
-          <div className="md:col-span-4">
+          {/* Card 4: Unresolved Mistakes (Cols 4) */}
+          <div className="col-span-12 sm:col-span-6 lg:col-span-4">
             <SpotlightCard className="p-5 flex flex-col justify-between h-full">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A8192]">Study Streak</span>
-                  <p className="font-space text-2xl font-bold text-[#211D28] dark:text-[#F5F0E8] mt-1 flex items-center gap-1.5">
-                    <Flame size={22} className="text-[#D7713A] dark:text-[#F2B38C] fill-current" />
-                    <AnimatedNumber value={streakDays} suffix={streakDays === 1 ? ' day' : ' days'} />
-                  </p>
-                  <p className="text-[11px] text-[#5F5668] dark:text-[#B8AFBE] mt-0.5">
-                    {stats?.activeDaysCount ? `${stats.activeDaysCount} active days recorded` : 'Consistency in progress'}
-                  </p>
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                    <AlertTriangle size={18} />
+                  </div>
+                  <div>
+                    <h4 className="font-display text-sm font-bold text-ink-900 dark:text-ink-50">
+                      Mistake Notebook
+                    </h4>
+                    <p className="text-[10px] text-ink-400">Targeted error resolution</p>
+                  </div>
                 </div>
-                <div className="h-12 w-12 rounded-2xl bg-[#F2B38C]/15 text-[#D7713A] dark:text-[#F2B38C] flex items-center justify-center">
-                  <Shield size={22} />
+                <Badge tone={unresolvedMistakes > 0 ? 'warning' : 'success'}>
+                  {unresolvedMistakes} Unresolved
+                </Badge>
+              </div>
+
+              <div className="my-4">
+                <p className="font-display text-2xl font-bold text-ink-900 dark:text-ink-50">
+                  <AnimatedNumber value={unresolvedMistakes} suffix=" items" />
+                </p>
+                <p className="text-xs text-ink-500 mt-0.5">
+                  {unresolvedMistakes > 0
+                    ? 'Review and resolve mistakes to gain +15 XP.'
+                    : 'Clean record! No unresolved mistakes.'}
+                </p>
+              </div>
+
+              <Link to="/app/mistakes">
+                <Button size="sm" variant="outline" className="w-full text-xs font-bold">
+                  Review Mistakes →
+                </Button>
+              </Link>
+            </SpotlightCard>
+          </div>
+
+          {/* Card 5: Next Calendar Target (Cols 4) */}
+          <div className="col-span-12 sm:col-span-6 lg:col-span-4">
+            <SpotlightCard className="p-5 flex flex-col justify-between h-full">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                    <Calendar size={18} />
+                  </div>
+                  <div>
+                    <h4 className="font-display text-sm font-bold text-ink-900 dark:text-ink-50">
+                      Calendar Schedule
+                    </h4>
+                    <p className="text-[10px] text-ink-400">Study plan timeline</p>
+                  </div>
+                </div>
+                <Badge tone="neutral">Upcoming</Badge>
+              </div>
+
+              <div className="my-4">
+                <p className="font-display text-lg font-bold text-ink-900 dark:text-ink-50 truncate">
+                  {nextCalendarEvent ? nextCalendarEvent.title : 'Study Session'}
+                </p>
+                <p className="text-xs text-ink-500 mt-0.5 truncate">
+                  {nextCalendarEvent?.date
+                    ? `Target: ${new Date(nextCalendarEvent.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
+                    : 'Scheduled in study plan.'}
+                </p>
+              </div>
+
+              <Link to="/app/calendar">
+                <Button size="sm" variant="outline" className="w-full text-xs font-bold">
+                  Open Calendar →
+                </Button>
+              </Link>
+            </SpotlightCard>
+          </div>
+
+          {/* Card 6: AI Interview Score & Report (Cols 4) */}
+          <div className="col-span-12 sm:col-span-6 lg:col-span-4">
+            <SpotlightCard className="p-5 flex flex-col justify-between h-full">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <BrainCircuit size={18} />
+                  </div>
+                  <div>
+                    <h4 className="font-display text-sm font-bold text-ink-900 dark:text-ink-50">
+                      Mock Interview
+                    </h4>
+                    <p className="text-[10px] text-ink-400">AI Speech & Technical</p>
+                  </div>
+                </div>
+                <Badge tone={lastInterviewScore !== null ? 'success' : 'neutral'}>
+                  {lastInterviewScore !== null ? 'Evaluated' : 'Practice'}
+                </Badge>
+              </div>
+
+              <div className="my-4">
+                <p className="font-display text-2xl font-bold text-ink-900 dark:text-ink-50">
+                  {lastInterviewScore !== null ? `${lastInterviewScore}%` : 'Not attempted'}
+                </p>
+                <p className="text-xs text-ink-500 mt-0.5">
+                  {lastInterviewScore !== null
+                    ? 'Latest technical interview performance.'
+                    : 'Practice live coding and behavioral questions.'}
+                </p>
+              </div>
+
+              <Link to="/app/interview">
+                <Button size="sm" variant="outline" className="w-full text-xs font-bold">
+                  {lastInterviewScore !== null ? 'View Interview Report →' : 'Start Practice Interview →'}
+                </Button>
+              </Link>
+            </SpotlightCard>
+          </div>
+
+          {/* Card 7: Gamification Metrics & Badges (Cols 4) */}
+          <div className="col-span-12 sm:col-span-6 lg:col-span-4">
+            <SpotlightCard className="p-5 flex flex-col justify-between h-full">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                    <Flame size={18} />
+                  </div>
+                  <div>
+                    <h4 className="font-display text-sm font-bold text-ink-900 dark:text-ink-50">
+                      Streak & XP
+                    </h4>
+                    <p className="text-[10px] text-ink-400">Level {level} Scholar</p>
+                  </div>
+                </div>
+                <Badge tone="accent">Level {level}</Badge>
+              </div>
+
+              <div className="my-4 flex items-center gap-6">
+                <div>
+                  <p className="font-display text-2xl font-bold text-ink-900 dark:text-ink-50 flex items-center gap-1">
+                    <Flame size={20} className="text-amber-500 fill-current" />
+                    <AnimatedNumber value={streakDays} suffix="d" />
+                  </p>
+                  <p className="text-[10px] text-ink-400">Current Streak</p>
+                </div>
+                <div>
+                  <p className="font-display text-2xl font-bold text-ink-900 dark:text-ink-50 flex items-center gap-1">
+                    <Zap size={20} className="text-[#6542C5] dark:text-[#B59AF7]" />
+                    <AnimatedNumber value={xp} />
+                  </p>
+                  <p className="text-[10px] text-ink-400">Total Verified XP</p>
                 </div>
               </div>
 
-              {/* GitHub-style 7-day mini activity dots with stagger */}
-              <div className="mt-3 pt-3 border-t border-[var(--border)] flex items-center justify-between">
-                <span className="text-[10px] text-[#8A8192] font-medium">Past 7 days</span>
-                <div className="flex items-center gap-1.5">
-                  {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, i) => {
-                    const isActive = i < Math.min(streakDays, 7);
-                    return (
-                      <motion.div
-                        key={i}
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{ delay: 0.1 + i * 0.05, type: 'spring', stiffness: 400 }}
-                        title={`${day}: ${isActive ? 'Active' : 'Rest'}`}
-                        className={`h-4 w-4 rounded-md flex items-center justify-center text-[9px] font-bold ${
-                          isActive
-                            ? 'bg-[#6542C5] text-white dark:bg-[#B59AF7] dark:text-[#141217]'
-                            : 'bg-[var(--surface-muted)] text-[var(--text-muted)] border border-[var(--border)]'
-                        }`}
-                      >
-                        {day}
-                      </motion.div>
-                    );
-                  })}
+              <Link to="/app/achievements">
+                <Button size="sm" variant="outline" className="w-full text-xs font-bold">
+                  View Badges & Milestones →
+                </Button>
+              </Link>
+            </SpotlightCard>
+          </div>
+
+          {/* Card 8: Quick Actions Row (Cols 4 on desktop) */}
+          <div className="col-span-12 sm:col-span-6 lg:col-span-4">
+            <SpotlightCard className="p-5 flex flex-col justify-between h-full">
+              <div>
+                <h4 className="font-display text-sm font-bold text-ink-900 dark:text-ink-50 mb-1">
+                  Quick Actions
+                </h4>
+                <p className="text-[10px] text-ink-400 mb-3">Jump right into study modes</p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Link to="/app/assessments">
+                    <Button size="sm" variant="outline" className="w-full text-[11px] justify-start h-8 px-2 font-semibold">
+                      <Play size={12} /> Mock Test
+                    </Button>
+                  </Link>
+                  <Link to="/app/calendar">
+                    <Button size="sm" variant="outline" className="w-full text-[11px] justify-start h-8 px-2 font-semibold">
+                      <Timer size={12} /> Focus Session
+                    </Button>
+                  </Link>
+                  <Link to="/app/tutor">
+                    <Button size="sm" variant="outline" className="w-full text-[11px] justify-start h-8 px-2 font-semibold">
+                      <MessageSquare size={12} /> Ask AI Tutor
+                    </Button>
+                  </Link>
+                  <Link to="/app/library">
+                    <Button size="sm" variant="outline" className="w-full text-[11px] justify-start h-8 px-2 font-semibold">
+                      <FileText size={12} /> Upload Doc
+                    </Button>
+                  </Link>
                 </div>
+              </div>
+
+              <div className="pt-3 border-t border-ink-100 dark:border-ink-800 mt-2">
+                <Link to="/app/coding">
+                  <Button variant="ghost" size="sm" className="w-full text-xs font-semibold">
+                    Coding Studio →
+                  </Button>
+                </Link>
               </div>
             </SpotlightCard>
           </div>
-        </Stagger>
 
-        {/* PRIMARY: Today's Plan Checklist & Progress Section */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <TodaysPlanSection plan={plan} />
-          <LearningProgressSection progress={progress} />
-        </section>
+          {/* Live Heatmap Component (Cols 12) */}
+          <div className="col-span-12">
+            <ActivityHeatmap compact />
+          </div>
 
-        {/* SECONDARY: Active Courses Cards */}
-        <section>
-          <MyCoursesSection plan={plan} />
-        </section>
-
-        {/* Quick Review & Retention Summary */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Link to="/app/flashcards" className="block">
-            <SpotlightCard className="p-4 hover:border-[#6542C5] dark:hover:border-[#B59AF7] transition-all flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#6542C5] dark:text-[#B59AF7] flex items-center justify-center">
-                  <Layers size={18} />
-                </div>
+          {/* Real Recent Activity Feed (Cols 12) */}
+          <div className="col-span-12">
+            <Card padding="lg">
+              <div className="flex items-center justify-between pb-3 border-b border-ink-100 dark:border-ink-800 mb-3">
                 <div>
-                  <p className="text-xs font-bold text-[#211D28] dark:text-[#F5F0E8]">{dueCardsCount} Flashcards Due</p>
-                  <p className="text-[10px] text-[#8A8192]">SM-2 Spaced Repetition</p>
+                  <h3 className="font-display text-base font-bold text-ink-900 dark:text-ink-50">
+                    Recent Verified Activity
+                  </h3>
+                  <p className="text-xs text-ink-400">Authentic learning events recorded on server</p>
                 </div>
+                <Link to="/app/progress" className="text-xs font-semibold text-[#6542C5] dark:text-[#B59AF7] hover:underline">
+                  View Full Analytics →
+                </Link>
               </div>
-              <ArrowRight size={14} className="text-[#8A8192]" />
-            </SpotlightCard>
-          </Link>
 
-          <Link to="/app/calendar" className="block">
-            <SpotlightCard className="p-4 hover:border-[#6542C5] dark:hover:border-[#B59AF7] transition-all flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-                  <Calendar size={18} />
+              {loadingActivities ? (
+                <div className="py-8 text-center text-xs text-ink-400">Loading activity feed...</div>
+              ) : recentActivities.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {recentActivities.map((ev, i) => (
+                    <div
+                      key={i}
+                      className="p-3 rounded-xl border border-ink-200 dark:border-ink-800 bg-ink-50/50 dark:bg-ink-900/30 flex items-center gap-3"
+                    >
+                      <div className="h-9 w-9 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#6542C5] dark:text-[#B59AF7] flex items-center justify-center shrink-0">
+                        <Zap size={16} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-ink-900 dark:text-ink-50 truncate">
+                          {ev.title || `Completed ${ev.type.replace('_', ' ')}`}
+                        </p>
+                        <p className="text-[10px] text-ink-400">
+                          {new Date(ev.time).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}{' '}
+                          · +{ev.points} pts
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <p className="text-xs font-bold text-[#211D28] dark:text-[#F5F0E8] truncate max-w-[150px]">{nextCalendarEvent}</p>
-                  <p className="text-[10px] text-[#8A8192]">Next Upcoming Target</p>
+              ) : (
+                <div className="py-8 text-center text-xs text-ink-400 space-y-1">
+                  <CheckCircle2 size={24} className="mx-auto text-ink-300" />
+                  <p className="font-semibold text-ink-700 dark:text-ink-300">No activity events recorded yet.</p>
+                  <p className="text-[11px]">Take a mock test or pass a stage test to start logging events!</p>
                 </div>
-              </div>
-              <ArrowRight size={14} className="text-[#8A8192]" />
-            </SpotlightCard>
-          </Link>
-
-          <Link to="/app/interview" className="block">
-            <SpotlightCard className="p-4 hover:border-[#6542C5] dark:hover:border-[#B59AF7] transition-all flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                  <BrainCircuit size={18} />
-                </div>
-                <div>
-                  <p className="text-xs font-bold text-[#211D28] dark:text-[#F5F0E8]">Mock Interview: {lastInterviewScore ?? '--'}%</p>
-                  <p className="text-[10px] text-[#8A8192]">Practice AI Interview</p>
-                </div>
-              </div>
-              <ArrowRight size={14} className="text-[#8A8192]" />
-            </SpotlightCard>
-          </Link>
-        </section>
-
-        {/* Compact Radial Activity Heatmap */}
-        <section>
-          <ActivityHeatmap compact />
-        </section>
-
-        {/* SUPPORTING: Recommendations & AI Insight */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <RecommendedSection weakTopics={weakTopics} />
-          <AIInsightCard weakTopics={weakTopics} />
-        </section>
-      </div>
+              )}
+            </Card>
+          </div>
+        </CardGrid>
+      </PageContainer>
     </AppLayout>
   );
 }

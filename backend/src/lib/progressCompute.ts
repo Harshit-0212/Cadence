@@ -1,5 +1,6 @@
 import { planStore, sessionStore, type StoredStudySession } from './studyPlans.js';
 import { assessmentStore, type StoredAssessmentResult } from './assessments.js';
+import { badgesStore } from './achievements.js';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const CONSISTENCY_WINDOW_DAYS = 14;
@@ -29,8 +30,13 @@ export interface Achievement {
   title: string;
   description: string;
   unlocked: boolean;
+  unlockedAt?: string;
   progress?: number;
   goal?: number;
+  category?: string;
+  rarity?: string;
+  xpReward?: number;
+  howToEarn?: string;
 }
 
 function toDateKey(iso: string): string {
@@ -226,13 +232,22 @@ export async function computeProgressForUser(userId: string): Promise<{
   const results = await assessmentStore.listByUser(userId);
 
   const snapshot = computeSnapshot(sessions, plan?.completionPercent ?? 0, results);
-  const achievements = computeAchievements(
-    sessions,
-    plan?.completionPercent ?? 0,
-    plan?.lastAdaptedAt ?? null,
-    results,
-    snapshot,
-  );
+  const realBadges = await badgesStore.getUserBadges(userId);
+  const achievements = realBadges.map((b) => ({
+    id: b.id,
+    icon: b.icon,
+    title: b.name,
+    description: b.description,
+    unlocked: b.unlocked,
+    unlockedAt: b.unlockedAt,
+    progress: b.progress,
+    goal: b.threshold,
+    category: b.category,
+    rarity: b.rarity,
+    xpReward: b.xpReward,
+    howToEarn: b.howToEarn,
+  }));
+
   const weakTopics = snapshot
     ? snapshot.topicStrengths
         .filter((t) => t.strengthLabel === 'critical' || t.strengthLabel === 'weak')

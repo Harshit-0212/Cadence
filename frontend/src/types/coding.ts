@@ -46,6 +46,8 @@ export interface PublicCodingProblemListItem {
   supportedLanguages: SupportedCodingLanguage[];
   executionLimits: ExecutionLimits;
   sampleCount: number;
+  status?: 'solved' | 'submitted' | 'not_attempted';
+  lastSubmittedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -71,6 +73,8 @@ export interface PublicCodingProblemDetail {
     caseSensitive: boolean;
   };
   sampleCases: PublicSampleCase[];
+  status?: 'solved' | 'submitted' | 'not_attempted';
+  lastSubmittedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -4,12 +4,21 @@ import { gamificationStore, type LearningActionType } from '../lib/gamificationS
 import { activityStore } from '../lib/activityStore.js';
 import { getDb } from '../lib/db.js';
 import { computeUserStatsSummary } from '../routes/stats.js';
+import { badgesStore } from '../lib/achievements.js';
 
 export const gamificationController = {
   async getLeaderboard(req: AuthedRequest, res: Response): Promise<void> {
     try {
       const db = await getDb();
       const users = await db.collection('users').find({}).toArray();
+
+      // Fetch all unlocked badges to display next to user names
+      const allUserBadges = await db.collection('user_badges').find({}).toArray();
+      const badgesByUser = new Map<string, string[]>();
+      for (const ub of allUserBadges) {
+        if (!badgesByUser.has(ub.userId)) badgesByUser.set(ub.userId, []);
+        badgesByUser.get(ub.userId)!.push(ub.badgeId);
+      }
 
       // Compute server XP & stats for each user (single source of truth)
       const userProfiles = await Promise.all(
@@ -23,6 +32,7 @@ export const gamificationController = {
             xp: stats.xp,
             level: stats.level,
             streak: stats.currentStreak,
+            badges: badgesByUser.get(userId) || [],
             updatedAt: new Date().toISOString(),
           };
 
@@ -51,6 +61,7 @@ export const gamificationController = {
         xp: p.xp,
         level: p.level,
         streak: p.streak,
+        badges: p.badges,
         isUser: p.isUser,
       }));
 
@@ -66,6 +77,7 @@ export const gamificationController = {
           xp: u.xp,
           level: u.level,
           streak: u.streak,
+          badges: u.badges,
           isUser: true,
         });
       }
@@ -73,6 +85,17 @@ export const gamificationController = {
       res.json({ data: enriched });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to fetch leaderboard.';
+      res.status(500).json({ error: { message } });
+    }
+  },
+
+  async getBadges(req: AuthedRequest, res: Response): Promise<void> {
+    const userId = req.userId!;
+    try {
+      const badges = await badgesStore.getUserBadges(userId);
+      res.json({ data: badges });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch badges.';
       res.status(500).json({ error: { message } });
     }
   },
@@ -106,7 +129,6 @@ export const gamificationController = {
       'comprehension_drill',
       'quiz_completed',
       'curriculum_step',
-      'tutor_session',
     ];
 
     if (!action || !validActions.includes(action)) {

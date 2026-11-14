@@ -309,6 +309,16 @@ export function CodingProblemDetail() {
         ...(optimizeMode ? { optimize: true } : {}),
       } as any);
       setSubmitResult(res);
+      const isAccepted = res.verdict === 'accepted';
+      setProblem((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: isAccepted ? 'solved' : (prev.status === 'solved' ? 'solved' : 'submitted'),
+              lastSubmittedAt: new Date().toISOString(),
+            }
+          : prev
+      );
       if (res.verdict === 'accepted') {
         showToast(optimizeMode ? 'Optimization accepted! Your solution was evaluated.' : 'Accepted! All test cases passed.', 'success');
         setSolvedStatus({
@@ -445,6 +455,36 @@ export function CodingProblemDetail() {
     }
   };
 
+  const getStatusChip = (status?: string, lastSubmittedAt?: string) => {
+    if (status === 'solved') {
+      return (
+        <span
+          title={lastSubmittedAt ? `Solved on ${new Date(lastSubmittedAt).toLocaleString()}` : 'Solved'}
+          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
+        >
+          <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400" />
+          Solved
+        </span>
+      );
+    }
+    if (status === 'submitted') {
+      return (
+        <span
+          title={lastSubmittedAt ? `Last submitted: ${new Date(lastSubmittedAt).toLocaleString()}` : 'Submitted'}
+          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
+        >
+          <Clock size={12} className="text-amber-600 dark:text-amber-400" />
+          Submitted
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-400 border border-gray-200 dark:border-slate-700">
+        Not attempted
+      </span>
+    );
+  };
+
   // If problem fetch failed completely
   if (!isLoadingProblem && (problemError || !problem)) {
     return (
@@ -535,6 +575,7 @@ export function CodingProblemDetail() {
                 </span>
                 <div className="hidden sm:flex items-center gap-1.5 shrink-0">
                   {problem && getDifficultyBadge(problem.difficulty)}
+                  {problem && getStatusChip(problem.status, problem.lastSubmittedAt)}
                   <span className="text-[11px] font-medium text-gray-500 dark:text-slate-400 flex items-center gap-1">
                     • {problem?.topic}
                   </span>
