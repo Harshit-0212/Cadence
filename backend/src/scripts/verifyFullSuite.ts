@@ -163,9 +163,9 @@ async function runVerification() {
   // ACTION 4: Coding Submission (coding_submission)
   // -------------------------------------------------------------
   // Insert a test problem if needed or find one
-  let problem = await db.collection('coding_problems').findOne({ status: 'published' });
+  let problem: any = await db.collection('coding_problems').findOne({ status: 'published' });
   if (!problem) {
-    const newProblem = {
+    const newProblem: any = {
       _id: `prob_${Date.now()}`,
       slug: `reverse-string-${Date.now()}`,
       title: 'Reverse String',
@@ -190,7 +190,7 @@ async function runVerification() {
       visibility: 'sample',
       order: 1,
       createdAt: new Date().toISOString(),
-    });
+    } as any);
     problem = newProblem;
   }
 

@@ -149,47 +149,69 @@ export function CalendarPage() {
     e.preventDefault();
   };
 
-  const handleDrop = (targetDateKey: string) => {
+  const handleDrop = async (targetDateKey: string) => {
     if (!draggedEvent) return;
     const previousDate = draggedEvent.date;
     const eventId = draggedEvent.id;
 
     if (previousDate === targetDateKey) return;
 
-    // Update state
+    // Optimistically update state
     setEvents((prev) =>
       prev.map((ev) => (ev.id === eventId ? { ...ev, date: targetDateKey } : ev))
     );
 
     showToast(`"${draggedEvent.title}" rescheduled to ${targetDateKey}.`, 'info');
 
+    // Persist to backend
+    try {
+      await learningFeaturesService.updateCalendarEvent(eventId, { date: targetDateKey });
+    } catch {
+      // Revert if API call fails
+      setEvents((prev) =>
+        prev.map((ev) => (ev.id === eventId ? { ...ev, date: previousDate } : ev))
+      );
+      showToast('Could not save rescheduled date.', 'error');
+    }
+
     setDraggedEvent(null);
   };
 
-  const handleCreateEvent = (e: React.FormEvent) => {
+  const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) {
       showToast('Please enter an event title', 'error');
       return;
     }
 
-    const created: CalendarEvent = {
-      id: `ev_${Date.now()}`,
-      title: newTitle.trim(),
-      date: newDate,
-      type: newType,
-      time: newTime || '10:00 AM',
-    };
+    try {
+      const persisted = await learningFeaturesService.createCalendarEvent({
+        title: newTitle.trim(),
+        date: newDate,
+        time: newTime || '10:00 AM',
+        type: newType === 'mocktest' ? 'mock-test' : (newType as any),
+      });
 
-    setEvents((prev) => [created, ...prev]);
-    setIsAddOpen(false);
-    setNewTitle('');
-    showToast(`Milestone scheduled for ${newDate}`, 'success');
+      const created: CalendarEvent = {
+        id: persisted?._id || `ev_${Date.now()}`,
+        title: persisted?.title || newTitle.trim(),
+        date: persisted?.date || newDate,
+        type: newType,
+        time: persisted?.time || newTime || '10:00 AM',
+      };
 
-    // Also persist via activity service if applicable
-    activityService
-      .recordActivity('session', 1, { title: created.title, scheduledDate: newDate })
-      .catch(() => {});
+      setEvents((prev) => [created, ...prev]);
+      setIsAddOpen(false);
+      setNewTitle('');
+      showToast(`Milestone scheduled for ${newDate}`, 'success');
+
+      activityService
+        .recordActivity('session', 1, { title: created.title, scheduledDate: newDate })
+        .catch(() => {});
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to create event';
+      showToast(msg, 'error');
+    }
   };
 
   const todayStr = activityService.getUserLocalDate();

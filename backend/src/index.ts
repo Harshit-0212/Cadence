@@ -25,7 +25,7 @@ import { featuresRouter } from './routes/features.js';
 import { activityRouter } from './routes/activity.js';
 import { statsRouter } from './routes/stats.js';
 import { activityStore } from './lib/activityStore.js';
-import { getDb } from './lib/db.js';
+import { getDb, isDbConnected } from './lib/db.js';
 import { initSocket } from './lib/socket.js';
 import { sendDueStudyReminders } from './lib/reminders.js';
 import { warmUpGoogleClient } from './lib/googleAuth.js';
@@ -67,10 +67,19 @@ app.use(
 );
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/api/health', (_req, res) => {
+const BUILD_TIME = process.env.BUILD_TIME || new Date().toISOString();
+const GIT_COMMIT = process.env.GIT_COMMIT || process.env.RENDER_GIT_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || 'local-dev';
+const APP_VERSION = process.env.npm_package_version || '1.0.0';
+
+app.get('/api/health', async (_req, res) => {
+  const dbStatus = await isDbConnected();
   res.json({
     data: {
-      ok: true,
+      status: 'ok',
+      version: APP_VERSION,
+      buildTime: BUILD_TIME,
+      gitCommit: GIT_COMMIT,
+      dbConnected: dbStatus,
       geminiConfigured: Boolean(config.geminiApiKey),
     },
   });
@@ -109,6 +118,20 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 });
 
 async function start() {
+  // Required environment variables check & logging (names only, never values)
+  const requiredEnvVars = [
+    'MONGODB_URI',
+    'JWT_SECRET',
+    'GEMINI_API_KEY',
+    'GEMINI_ENCRYPTION_KEY',
+    'CLIENT_ORIGIN',
+  ];
+  console.log('[nova-server] Startup environment variables check:');
+  for (const envName of requiredEnvVars) {
+    const isSet = Boolean(process.env[envName] || (envName === 'GEMINI_ENCRYPTION_KEY' && getRawGeminiEncryptionKey()));
+    console.log(`  ${envName}: ${isSet ? 'SET' : 'MISSING'}`);
+  }
+
   if (!config.jwtSecret) {
     console.warn('[nova-server] WARNING: JWT_SECRET is not set. Copy server/.env.example to server/.env and set one.');
   }

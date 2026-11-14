@@ -97,6 +97,14 @@ function PageTransitionWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+function NotFoundOrRedirect() {
+  const { user } = useAuth();
+  if (user) {
+    return <Navigate to="/app" replace />;
+  }
+  return <Navigate to="/" replace />;
+}
+
 function AppRoutes() {
   const location = useLocation();
 
@@ -343,7 +351,7 @@ function AppRoutes() {
             path="/debugger"
             element={<Navigate to="/app/debugger" replace />}
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundOrRedirect />} />
         </Routes>
       </PageTransitionWrapper>
     </Suspense>

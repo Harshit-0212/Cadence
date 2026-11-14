@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Moon, Sun, Bell, Clock, Target, LogOut, Trash2, ChevronRight, RefreshCw, Database } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Moon, Sun, Bell, Clock, Target, LogOut, Trash2, ChevronRight, RefreshCw, Database, Server, CheckCircle2 } from 'lucide-react';
+import { fetchApi } from '@/services/api';
 import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -25,6 +26,20 @@ export function Settings() {
   const [reminderTime, setReminderTime] = useState('18:00');
   const [dailyTarget, setDailyTarget] = useState(120);
   const [rebuilding, setRebuilding] = useState(false);
+  const [healthInfo, setHealthInfo] = useState<{
+    version?: string;
+    buildTime?: string;
+    gitCommit?: string;
+    dbConnected?: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    fetchApi('/health')
+      .then((data: any) => {
+        if (data) setHealthInfo(data);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -148,6 +163,34 @@ export function Settings() {
 
           {/* AI Settings / Connect Gemini */}
           <AISettingsCard />
+
+          {/* System & Backend Version */}
+          <Card padding="lg">
+            <CardHeader title="System & Environment" subtitle="Runtime status and deployment details" />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between rounded-xl border border-ink-200 p-4 dark:border-ink-700">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-50 text-[#6542C5] dark:bg-primary-900/40">
+                    <Server size={20} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-ink-900 dark:text-ink-50">Backend version</p>
+                    <p className="text-xs text-ink-400 font-mono">
+                      v{healthInfo?.version || '1.0.0'} ({healthInfo?.gitCommit || 'dev'})
+                    </p>
+                  </div>
+                </div>
+                <Badge tone="success">
+                  {healthInfo?.dbConnected ? 'DB Connected' : 'Ready'}
+                </Badge>
+              </div>
+              {healthInfo?.buildTime && (
+                <div className="px-4 py-2 rounded-xl bg-ink-50 dark:bg-ink-800/40 text-[11px] text-ink-500 font-mono">
+                  Built: {new Date(healthInfo.buildTime).toLocaleString()}
+                </div>
+              )}
+            </div>
+          </Card>
 
           {/* Activity Data Sync & Repair */}
           <Card padding="lg">

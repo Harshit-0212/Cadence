@@ -10,6 +10,7 @@ export interface StoredUser {
   role?: 'admin' | 'user';
   created_at: string;
   avatar_image?: string;
+  timezone?: string;
 }
 
 async function usersCollection() {
@@ -96,5 +97,10 @@ export const userStore = {
     const col = await usersCollection();
     const res = await col.updateOne({ id: userId }, { $set: { role } });
     return res.matchedCount > 0;
+  },
+
+  async updateTimezone(userId: string, timezone: string): Promise<void> {
+    const col = await usersCollection();
+    await col.updateOne({ id: userId }, { $set: { timezone } });
   },
 };

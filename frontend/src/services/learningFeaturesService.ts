@@ -31,33 +31,40 @@ export interface CalendarEventRecord {
   userId: string;
   title: string;
   date: string;
+  time?: string;
   type: 'session' | 'mock-test' | 'flashcard' | 'interview' | 'deadline' | 'custom';
   completed?: boolean;
 }
 
 export interface InterviewReportRecord {
-  _id: string;
+  _id?: string;
+  id?: string;
   userId: string;
   role: string;
-  mode: string;
+  mode?: string;
+  difficulty?: string;
+  topic?: string;
   overallScore: number;
   communicationScore: number;
-  technicalScore: number;
+  technicalDepthScore?: number;
+  technicalScore?: number;
   confidenceScore: number;
   strengths: string[];
   weaknesses: Array<{
-    area: string;
-    reason: string;
-    fix: string;
-    studyLink: string;
+    area?: string;
+    reason?: string;
+    fix?: string;
+    studyLink?: string;
   }>;
-  perQuestion: Array<{
+  questions?: Array<{
     question: string;
-    answer: string;
-    sampleAnswer: string;
+    userAnswer?: string;
+    answer?: string;
+    sampleAnswer?: string;
     score: number;
+    reason?: string;
   }>;
-  createdAt: string;
+  createdAt?: string;
 }
 
 export const learningFeaturesService = {
@@ -116,14 +123,21 @@ export const learningFeaturesService = {
   async getCalendarEvents(from?: string, to?: string): Promise<CalendarEventRecord[]> {
     const query = from && to ? `?from=${from}&to=${to}` : '';
     const res = (await fetchApi(`/calendar${query}`)) as any;
-    return res.data?.events || [];
+    return res.data?.events || (Array.isArray(res.data) ? res.data : []);
   },
   async createCalendarEvent(event: Partial<CalendarEventRecord>): Promise<CalendarEventRecord> {
     const res = (await fetchApi('/calendar', {
       method: 'POST',
       body: JSON.stringify(event),
     })) as any;
-    return res.data?.event;
+    return res.data?.event || res.data;
+  },
+  async updateCalendarEvent(id: string, patch: Partial<CalendarEventRecord>): Promise<CalendarEventRecord> {
+    const res = (await fetchApi(`/calendar/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    })) as any;
+    return res.data?.event || res.data;
   },
   async deleteCalendarEvent(id: string): Promise<void> {
     await fetchApi(`/calendar/${id}`, { method: 'DELETE' });
@@ -132,18 +146,19 @@ export const learningFeaturesService = {
   // Interview Prep
   async evaluateInterview(payload: {
     role: string;
-    mode: string;
+    difficulty?: string;
+    mode?: string;
     questions: Array<{ question: string; answer: string }>;
   }): Promise<InterviewReportRecord> {
     const res = (await fetchApi('/interview/evaluate', {
       method: 'POST',
       body: JSON.stringify(payload),
     })) as any;
-    return res.data?.report;
+    return res.data?.report || res.data;
   },
   async getInterviewReports(): Promise<InterviewReportRecord[]> {
     const res = (await fetchApi('/interview/reports')) as any;
-    return res.data?.reports || [];
+    return res.data?.reports || (Array.isArray(res.data) ? res.data : []);
   },
 };
 

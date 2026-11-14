@@ -272,6 +272,12 @@ export const learningStore = {
     return res.deletedCount > 0;
   },
 
+  async updateCalendarEvent(userId: string, id: string, patch: Partial<CalendarEventRecord>): Promise<CalendarEventRecord | null> {
+    const db = await getDb();
+    await db.collection<CalendarEventRecord>('calendar_events').updateOne({ id, userId }, { $set: patch });
+    return db.collection<CalendarEventRecord>('calendar_events').findOne({ id, userId });
+  },
+
   // Interview reports
   async saveInterviewReport(report: Omit<InterviewReportRecord, 'id' | 'createdAt'>): Promise<InterviewReportRecord> {
     const db = await getDb();

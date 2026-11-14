@@ -5,6 +5,7 @@ import { mockTestSessionStore } from '../lib/mockTestSessions.js';
 import { activityStore } from '../lib/activityStore.js';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { emitToUser } from '../lib/socket.js';
+import { resolveEffectiveTimezone, getDateKeyForTimezone } from '../lib/timezone.js';
 
 export const mocktestRouter = Router();
 
@@ -14,12 +15,8 @@ function resolveDateKey(timezone?: string, localDate?: string): string {
   if (typeof localDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(localDate)) {
     return localDate;
   }
-  try {
-    const tz = typeof timezone === 'string' && timezone ? timezone : 'UTC';
-    return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
-  } catch {
-    return new Date().toISOString().slice(0, 10);
-  }
+  const tz = resolveEffectiveTimezone(timezone).timezone;
+  return getDateKeyForTimezone(new Date(), tz);
 }
 
 function getFallbackQuestions(subject: string, count: number): GeneratedQuestion[] {

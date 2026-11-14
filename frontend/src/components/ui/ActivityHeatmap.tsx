@@ -10,6 +10,7 @@ import {
   Grid,
   Disc,
   X,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   activityService,
@@ -44,7 +45,7 @@ const FILTER_OPTIONS = [
 
 export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
   const shouldReduceMotion = useReducedMotion();
-  const { activityData: sharedActivity, stats: sharedStats } = useStats();
+  const { activityData: sharedActivity, stats: sharedStats, error: statsError, refreshStats } = useStats();
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
   const [activeFilter, setActiveFilter] = useState<string>('all');
@@ -53,12 +54,14 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
   const [data, setData] = useState<ActivityResponse | null>(sharedActivity);
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [replayKey, setReplayKey] = useState<number>(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Sync with shared activity data when viewing current year with 'all' filter
   useEffect(() => {
     if (selectedYear === currentYear && activeFilter === 'all' && sharedActivity) {
       setData(sharedActivity);
       setLoading(false);
+      setLoadError(null);
     }
   }, [sharedActivity, selectedYear, activeFilter, currentYear]);
 
@@ -81,14 +84,17 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
     if (selectedYear === currentYear && activeFilter === 'all' && sharedActivity) {
       setData(sharedActivity);
       setLoading(false);
+      setLoadError(null);
       return;
     }
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await activityService.getActivity(selectedYear, undefined, activeFilter);
       setData(res);
-    } catch {
-      // Fallback
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load activity';
+      setLoadError(msg);
     } finally {
       setLoading(false);
     }
@@ -230,6 +236,24 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
               {f.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Error state with retry */}
+      {(statsError || loadError) && (
+        <div className="my-3 p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="text-rose-500 w-4 h-4 shrink-0" />
+            <p className="text-xs text-rose-700 dark:text-rose-300 font-medium">
+              Could not load activity: {statsError || loadError}
+            </p>
+          </div>
+          <button
+            onClick={() => { refreshStats(); loadData(); }}
+            className="px-3 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+          >
+            <RotateCcw size={12} /> Retry
+          </button>
         </div>
       )}
 

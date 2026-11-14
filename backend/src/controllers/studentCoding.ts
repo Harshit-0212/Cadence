@@ -5,6 +5,8 @@ import { codingProblemStore, newSubmissionId, type StoredCodingSubmission } from
 import { studentProgressStore, journeyStore } from '../lib/journeyStore.js';
 import { activityStore } from '../lib/activityStore.js';
 import { emitToUser } from '../lib/socket.js';
+import { getDateKeyForTimezone } from '../lib/timezone.js';
+import { userStore } from '../lib/users.js';
 import type {
   ProblemDifficulty,
   PublicCodingProblemListItem,
@@ -322,7 +324,8 @@ export const studentCodingController = {
     await codingProblemStore.recordSubmission(submissionRecord);
 
     // Record activity event for coding submission (points: 3 for accepted, 1 for attempt)
-    const today = new Date().toISOString().slice(0, 10);
+    const user = await userStore.findById(userId);
+    const today = getDateKeyForTimezone(new Date(), user?.timezone || 'Asia/Kolkata');
     const codingPoints = overallVerdict === 'accepted' ? 3 : 1;
     await activityStore.recordActivity(
       userId,

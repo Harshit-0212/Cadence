@@ -2,6 +2,8 @@ import { Router, type Response } from 'express';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { getDb } from '../lib/db.js';
 import { activityStore } from '../lib/activityStore.js';
+import { resolveEffectiveTimezone, getDateKeyForTimezone } from '../lib/timezone.js';
+import { userStore } from '../lib/users.js';
 
 export const statsRouter = Router();
 statsRouter.use(requireAuth);
@@ -50,16 +52,15 @@ export interface StatsSummary {
 
 export async function computeUserStatsSummary(userId: string, timezone?: string, localDate?: string): Promise<StatsSummary> {
   const db = await getDb();
+  const user = await userStore.findById(userId);
 
-  // Resolve user local date from timezone
+  // Resolve user local date from timezone using shared helper
+  const tzResolution = resolveEffectiveTimezone(timezone, user?.timezone);
+  const effectiveTz = tzResolution.timezone || 'Asia/Kolkata';
+
   let userToday = typeof localDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(localDate) ? localDate : '';
   if (!userToday) {
-    try {
-      const tz = typeof timezone === 'string' && timezone ? timezone : 'UTC';
-      userToday = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
-    } catch {
-      userToday = new Date().toISOString().slice(0, 10);
-    }
+    userToday = getDateKeyForTimezone(new Date(), effectiveTz);
   }
 
   // 1. Streak and distinct days directly from activity_events (single source of truth)
@@ -199,10 +200,17 @@ statsRouter.get('/summary', async (req: AuthedRequest, res: Response) => {
   const userId = req.userId!;
   const { timezone, localDate } = req.query;
 
+  const user = await userStore.findById(userId);
+  const tzResolution = resolveEffectiveTimezone(timezone as string, user?.timezone);
+  if (tzResolution.error) {
+    res.status(400).json({ error: { message: tzResolution.error } });
+    return;
+  }
+
   try {
     const summary = await computeUserStatsSummary(
       userId,
-      typeof timezone === 'string' ? timezone : undefined,
+      tzResolution.timezone,
       typeof localDate === 'string' ? localDate : undefined
     );
     res.json({ data: summary });

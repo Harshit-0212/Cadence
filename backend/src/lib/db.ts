@@ -21,6 +21,16 @@ export function getDb(): Promise<Db> {
   return dbPromise;
 }
 
+export async function isDbConnected(): Promise<boolean> {
+  try {
+    const db = await getDb();
+    await db.command({ ping: 1 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function closeDb(): Promise<void> {
   await client?.close();
   client = null;

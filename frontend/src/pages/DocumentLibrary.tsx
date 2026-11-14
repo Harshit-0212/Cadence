@@ -21,13 +21,14 @@ import { useToast } from '@/store/ToastContext';
 import { documentService } from '@/services/documentService';
 import { learningFeaturesService } from '@/services/learningFeaturesService';
 import { invalidateStats } from '@/store/StatsContext';
+import { safeRenderText, SafeText } from '@/utils/safeRender';
 
 interface DocumentItem {
   id: string;
   name: string;
   subject: string;
   summary: string;
-  keyPoints: string[];
+  keyPoints: Array<any>;
   uploadedAt: string;
 }
 
@@ -120,10 +121,13 @@ export function DocumentLibrary() {
       }
 
       // 2. Generate flashcards with strict anti-duplication
+      const highlightsText = doc.keyPoints
+        .map((k) => (typeof k === 'object' && k !== null ? k.name || JSON.stringify(k) : String(k)))
+        .join(', ');
       const res = await learningFeaturesService.generateFlashcardsForDocument({
         documentId: doc.id,
         documentName: doc.name,
-        documentContent: `${doc.summary} Key highlights: ${doc.keyPoints.join(', ')}`,
+        documentContent: `${doc.summary} Key highlights: ${highlightsText}`,
         existingQuestions,
       });
 
@@ -235,14 +239,36 @@ export function DocumentLibrary() {
                   </p>
 
                   <div className="mt-3 flex flex-wrap gap-1.5">
-                    {doc.keyPoints.map((pt) => (
-                      <span
-                        key={pt}
-                        className="px-2 py-0.5 rounded-md text-[10px] bg-[var(--surface-muted)] text-[var(--text-muted)] border border-[var(--border)]"
-                      >
-                        {pt}
-                      </span>
-                    ))}
+                    {doc.keyPoints.map((pt, idx) => {
+                      if (typeof pt === 'object' && pt !== null) {
+                        return (
+                          <div
+                            key={idx}
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] bg-[var(--surface-muted)] text-[var(--text-primary)] border border-[var(--border)]"
+                          >
+                            <span className="font-medium">{safeRenderText(pt.name || pt)}</span>
+                            {pt.importance && (
+                              <span className="px-1 py-0.2 rounded text-[9px] font-semibold bg-[#6542C5]/10 text-[#6542C5] dark:text-[#B59AF7]">
+                                {safeRenderText(pt.importance)}
+                              </span>
+                            )}
+                            {pt.frequency !== undefined && (
+                              <span className="px-1 py-0.2 rounded text-[9px] bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                                freq: {safeRenderText(pt.frequency)}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                      return (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded-md text-[10px] bg-[var(--surface-muted)] text-[var(--text-muted)] border border-[var(--border)]"
+                        >
+                          <SafeText value={pt} />
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
 

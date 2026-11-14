@@ -399,12 +399,12 @@ export function Assessments() {
       <PageContainer maxWidth="7xl">
         <PageHeader
           title="Assessments"
-          subtitle="Generate mock tests and find your weak spots."
-          action={
+          badge={
             <Badge tone="primary">
               <ClipboardList size={12} /> Mock tests
             </Badge>
           }
+          subtitle="Generate mock tests and find your weak spots."
         />
 
         <AnimatePresence mode="wait">
