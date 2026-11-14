@@ -18,7 +18,7 @@ import { Reveal, Stagger } from '@/components/ui/Reveal';
 export function Settings() {
   const { theme, toggleTheme } = useTheme();
   const { logout, user } = useAuth();
-  const { refreshStats } = useStats();
+  const { stats, refreshStats } = useStats();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
@@ -196,6 +196,22 @@ export function Settings() {
           <Card padding="lg">
             <CardHeader title="Activity & Streaks" subtitle="Synchronize historical progress & activity events" />
             <div className="space-y-3">
+              {stats && (
+                <div className="grid grid-cols-3 gap-2.5 p-3 rounded-xl bg-ink-50 dark:bg-ink-800/50 border border-ink-100 dark:border-ink-800">
+                  <div className="text-center">
+                    <span className="text-[10px] uppercase font-bold text-ink-400">Current Streak</span>
+                    <p className="font-space text-base font-bold text-ink-900 dark:text-ink-50 mt-0.5">{stats.currentStreak} days</p>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-[10px] uppercase font-bold text-ink-400">Active Days</span>
+                    <p className="font-space text-base font-bold text-ink-900 dark:text-ink-50 mt-0.5">{stats.activeDaysCount} days</p>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-[10px] uppercase font-bold text-ink-400">Activity Points</span>
+                    <p className="font-space text-base font-bold text-ink-900 dark:text-ink-50 mt-0.5">{stats.totalPoints} pts</p>
+                  </div>
+                </div>
+              )}
               <div className="flex items-start gap-3 rounded-xl border border-ink-200 p-4 dark:border-ink-700">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-50 text-[#6542C5] dark:bg-primary-900/40 shrink-0">
                   <Database size={20} />

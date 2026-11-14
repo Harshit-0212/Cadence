@@ -265,7 +265,7 @@ featuresRouter.post('/flashcards/:id/review', async (req: AuthedRequest, res: Re
       today,
       1,
       { cardId: req.params.id, rating },
-      `flashcard:${req.params.id}:${Date.now()}`
+      `flashcard:${req.params.id}:${today}`
     );
     emitToUser(userId, 'stats:invalidate', { reason: 'flashcard_reviewed', cardId: req.params.id });
   }

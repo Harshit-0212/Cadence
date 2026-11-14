@@ -50,8 +50,10 @@ export function StatsProvider({ children }: { children: ReactNode }) {
         statsService.getSummary(),
         activityService.getActivity(),
       ]);
-      setStats(newStats);
-      setActivityData(newActivity);
+      const resolvedStats = (newStats as any)?.data ?? newStats;
+      const resolvedActivity = (newActivity as any)?.data ?? newActivity;
+      setStats(resolvedStats);
+      setActivityData(resolvedActivity);
     } catch (err: unknown) {
       console.error('[StatsContext] Failed to load stats:', err);
       const msg = err instanceof Error ? err.message : 'Failed to connect to stats service';

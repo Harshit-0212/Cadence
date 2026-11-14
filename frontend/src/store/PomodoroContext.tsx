@@ -9,6 +9,8 @@ export interface PomodoroState {
   durationMinutes: number;
   endsAt: number | null; // epoch timestamp ms
   remainingSeconds: number;
+  sessionId?: string | null;
+  sessionStart?: number | null;
 }
 
 interface PomodoroContextValue extends PomodoroState {
@@ -38,6 +40,8 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
             ...parsed,
             remainingSeconds: rem,
             isActive: rem > 0,
+            sessionId: parsed.sessionId || `focus_${parsed.endsAt}`,
+            sessionStart: parsed.sessionStart || (parsed.endsAt - (parsed.durationMinutes || 25) * 60000),
           };
         }
         return parsed;
@@ -51,23 +55,26 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
       durationMinutes: 25,
       endsAt: null,
       remainingSeconds: 25 * 60,
+      sessionId: null,
+      sessionStart: null,
     };
   });
 
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  const sessionIdRef = useRef<string | null>(null);
-  const sessionStartRef = useRef<number | null>(null);
+  const sessionIdRef = useRef<string | null>(state.sessionId || null);
+  const sessionStartRef = useRef<number | null>(state.sessionStart || null);
   const recordedSessionIdRef = useRef<string | null>(null);
 
   // Helper to record focus time if session was active for at least 1 minute (60s)
   const recordFocusSession = async (completedNormally = false) => {
     if (stateRef.current.mode !== 'work') return;
-    const sessionId = sessionIdRef.current;
+    const sessionId = stateRef.current.sessionId || sessionIdRef.current || `focus_${stateRef.current.endsAt || Date.now()}`;
     if (!sessionId || recordedSessionIdRef.current === sessionId) return;
 
     const startMs =
+      stateRef.current.sessionStart ||
       sessionStartRef.current ||
       (stateRef.current.endsAt ? stateRef.current.endsAt - stateRef.current.durationMinutes * 60000 : Date.now());
     const elapsedSecs = Math.max(0, Math.round((Date.now() - startMs) / 1000));
@@ -86,10 +93,50 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
     try {
       await activityService.recordFocus(sessionId, elapsedMinutes);
       invalidateStats();
-    } catch {
-      // Offline fallback
+    } catch (err) {
+      console.error('[PomodoroContext] Failed to record focus:', err);
     }
   };
+
+  // Keepalive delivery when page closes
+  useEffect(() => {
+    const handleUnload = () => {
+      if (stateRef.current.isActive && stateRef.current.mode === 'work') {
+        const sessionId = stateRef.current.sessionId || sessionIdRef.current;
+        if (!sessionId || recordedSessionIdRef.current === sessionId) return;
+        const startMs = stateRef.current.sessionStart || sessionStartRef.current;
+        if (!startMs) return;
+        const elapsedSecs = Math.max(0, Math.round((Date.now() - startMs) / 1000));
+        if (elapsedSecs >= 60) {
+          const elapsedMinutes = Math.max(1, Math.round(elapsedSecs / 60));
+          const token = localStorage.getItem('nova_auth_token');
+          const payload = JSON.stringify({
+            sessionId,
+            durationMinutes: elapsedMinutes,
+            timezone: activityService.getUserTimezone(),
+            localDate: activityService.getUserLocalDate(),
+          });
+          const url = `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/activity/focus`;
+          fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: payload,
+            keepalive: true,
+          }).catch(() => {});
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+    };
+  }, []);
 
   // Persist state changes
   useEffect(() => {
@@ -99,6 +146,27 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
       // Ignore
     }
   }, [state]);
+
+  // Check for expired session on mount (completed while tab was closed)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.isActive && parsed.endsAt && parsed.endsAt <= Date.now() && parsed.mode === 'work') {
+          const sId = parsed.sessionId || `focus_${parsed.endsAt}`;
+          activityService
+            .recordFocus(sId, parsed.durationMinutes || 25)
+            .then(() => {
+              invalidateStats();
+            })
+            .catch(() => {});
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
 
   // Handle completion audio & activity log
   const handleComplete = async (completedMode: 'work' | 'break', duration: number) => {
@@ -131,6 +199,8 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
         durationMinutes: 5,
         endsAt: null,
         remainingSeconds: breakSecs,
+        sessionId: null,
+        sessionStart: null,
       });
     } else {
       showToast('Break finished! Ready to focus again?', 'info');
@@ -141,6 +211,8 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
         durationMinutes: 25,
         endsAt: null,
         remainingSeconds: workSecs,
+        sessionId: null,
+        sessionStart: null,
       });
     }
   };
@@ -181,9 +253,11 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const startTimer = (durationMinutes = state.durationMinutes, mode: 'work' | 'break' = state.mode) => {
     const totalSecs = durationMinutes * 60;
     const endsAt = Date.now() + totalSecs * 1000;
+    const newSessionId = mode === 'work' ? `focus_${Date.now()}` : null;
+    const newSessionStart = mode === 'work' ? Date.now() : null;
     if (mode === 'work') {
-      sessionIdRef.current = `focus_${Date.now()}`;
-      sessionStartRef.current = Date.now();
+      sessionIdRef.current = newSessionId;
+      sessionStartRef.current = newSessionStart;
       recordedSessionIdRef.current = null;
     }
     setState({
@@ -192,6 +266,8 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
       durationMinutes,
       endsAt,
       remainingSeconds: totalSecs,
+      sessionId: newSessionId,
+      sessionStart: newSessionStart,
     });
   };
 

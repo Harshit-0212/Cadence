@@ -56,14 +56,15 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
   const [replayKey, setReplayKey] = useState<number>(0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Sync with shared activity data when viewing current year with 'all' filter
+  // Sync with shared activity data
   useEffect(() => {
-    if (selectedYear === currentYear && activeFilter === 'all' && sharedActivity) {
-      setData(sharedActivity);
+    if (sharedActivity) {
+      const resolved = (sharedActivity as any)?.data ?? sharedActivity;
+      setData(resolved);
       setLoading(false);
       setLoadError(null);
     }
-  }, [sharedActivity, selectedYear, activeFilter, currentYear]);
+  }, [sharedActivity]);
 
   // Portal tooltip state
   const [tooltip, setTooltip] = useState<{
@@ -81,17 +82,12 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
   });
 
   const loadData = async () => {
-    if (selectedYear === currentYear && activeFilter === 'all' && sharedActivity) {
-      setData(sharedActivity);
-      setLoading(false);
-      setLoadError(null);
-      return;
-    }
     setLoading(true);
     setLoadError(null);
     try {
       const res = await activityService.getActivity(selectedYear, undefined, activeFilter);
-      setData(res);
+      const resolved = (res as any)?.data ?? res;
+      setData(resolved);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load activity';
       setLoadError(msg);
@@ -104,22 +100,23 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
     loadData();
   }, [selectedYear, activeFilter]);
 
-  // Generate all 365/366 days for the year
+  // Generate all 365/366 days for the year with string arithmetic (immune to timezone shifts)
   const daysOfYear = useMemo(() => {
     const days: { dateKey: string; month: number; day: number; dayOfWeek: number }[] = [];
-    const isLeap = (selectedYear % 4 === 0 && selectedYear % 100 !== 0) || selectedYear % 400 === 0;
-    const totalDays = isLeap ? 366 : 365;
-
-    const start = new Date(Date.UTC(selectedYear, 0, 1));
-    for (let i = 0; i < totalDays; i++) {
-      const d = new Date(start.getTime() + i * 86400000);
-      const dateKey = d.toISOString().slice(0, 10);
-      days.push({
-        dateKey,
-        month: d.getUTCMonth(),
-        day: d.getUTCDate(),
-        dayOfWeek: d.getUTCDay(), // 0 = Sun, 1 = Mon ...
-      });
+    for (let m = 0; m < 12; m++) {
+      const daysInMonth = new Date(selectedYear, m + 1, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        const mm = String(m + 1).padStart(2, '0');
+        const dd = String(d).padStart(2, '0');
+        const dateKey = `${selectedYear}-${mm}-${dd}`;
+        const dayOfWeek = new Date(selectedYear, m, d).getDay();
+        days.push({
+          dateKey,
+          month: m,
+          day: d,
+          dayOfWeek,
+        });
+      }
     }
     return days;
   }, [selectedYear]);
@@ -411,7 +408,7 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
               >
                 <p className="font-bold">{tooltip.date}</p>
                 {tooltip.info ? (
-                  <div className="mt-1 space-y-0.5 text-[11px] opacity-90">
+                  <div className="mt-1 space-y-1 text-[11px] opacity-90 max-w-xs">
                     <p className="font-semibold text-[#B59AF7] dark:text-[#6542C5]">
                       {tooltip.info.totalPoints} points · {tooltip.info.count} activities
                     </p>
@@ -420,6 +417,15 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
                         {k.replace('_', ' ')}: {count}
                       </p>
                     ))}
+                    {tooltip.info.items && tooltip.info.items.length > 0 && (
+                      <div className="mt-1 pt-1 border-t border-white/20 dark:border-black/20 space-y-0.5">
+                        {tooltip.info.items.map((item, idx) => (
+                          <p key={idx} className="text-[10px] truncate">
+                            • {item.title || item.type.replace('_', ' ')} ({item.points} pt{item.points === 1 ? '' : 's'})
+                          </p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-0.5 text-[10px] opacity-75">No activity recorded</p>

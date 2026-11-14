@@ -5,7 +5,7 @@ let client: MongoClient | null = null;
 let dbPromise: Promise<Db> | null = null;
 
 async function connect(): Promise<Db> {
-  const c = new MongoClient(config.mongoUri);
+  const c = new MongoClient(config.mongoUri, { serverSelectionTimeoutMS: 2500 });
   await c.connect();
   client = c;
   return c.db(config.mongoDbName);

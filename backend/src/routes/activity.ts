@@ -1,7 +1,7 @@
 import { Router, type Response } from 'express';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { activityStore, type ActivityEventType } from '../lib/activityStore.js';
-import { backfillUserActivity } from '../lib/activityBackfill.js';
+import { backfillUserActivity, cleanupAndRepairUserActivity } from '../lib/activityBackfill.js';
 import { emitToUser } from '../lib/socket.js';
 import { resolveEffectiveTimezone, getDateKeyForTimezone } from '../lib/timezone.js';
 import { userStore } from '../lib/users.js';
@@ -221,6 +221,22 @@ activityRouter.post('/backfill', async (req: AuthedRequest, res: Response) => {
     res.json({ data: result });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Backfill failed';
+    res.status(500).json({ error: { message: msg } });
+  }
+});
+
+/**
+ * POST /api/activity/repair
+ * Runs deduplication, repairs wrong dates, fixes session points, and recomputes streak.
+ */
+activityRouter.post('/repair', async (req: AuthedRequest, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const result = await cleanupAndRepairUserActivity(userId);
+    emitToUser(userId, 'stats:invalidate', { reason: 'repair' });
+    res.json({ data: result });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Repair failed';
     res.status(500).json({ error: { message: msg } });
   }
 });

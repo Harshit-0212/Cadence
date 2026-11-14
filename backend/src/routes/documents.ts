@@ -7,6 +7,8 @@ import { documentStore } from '../lib/documentStore.js';
 import { mockTestSessionStore } from '../lib/mockTestSessions.js';
 import { activityStore } from '../lib/activityStore.js';
 import { emitToUser } from '../lib/socket.js';
+import { getDateKeyForTimezone } from '../lib/timezone.js';
+import { userStore } from '../lib/users.js';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 
 export const documentsRouter = Router();
@@ -66,14 +68,15 @@ documentsRouter.post('/analyze', requireAuth, (req: AuthedRequest, res) => {
       });
 
       // Record document upload activity event
-      const dateKey = new Date().toISOString().slice(0, 10);
+      const user = await userStore.findById(req.userId!);
+      const dateKey = getDateKeyForTimezone(new Date(), user?.timezone || 'Asia/Kolkata');
       await activityStore.recordActivity(
         req.userId!,
         'document',
         dateKey,
         1,
         { title: `Uploaded: ${req.file.originalname}`, documentId },
-        `doc:${documentId}`
+        `document:${documentId}`
       );
       emitToUser(req.userId!, 'stats:invalidate', { reason: 'document_uploaded', documentId });
 

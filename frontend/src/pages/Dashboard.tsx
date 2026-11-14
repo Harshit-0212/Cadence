@@ -89,63 +89,33 @@ export function Dashboard() {
     );
   }
 
-  // Proper Empty State for new users with no plan
-  if (!plan) {
-    return (
-      <AppLayout>
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-[#D8D0C5] dark:border-white/10 pb-5">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#6542C5] dark:text-[#B59AF7]">
-                <Sparkles size={14} /> Learning Workspace
-              </div>
-              <h1 className="mt-1 font-space text-2xl sm:text-3xl font-bold tracking-tight text-[#211D28] dark:text-[#F5F0E8]">
-                Welcome to Cadence, {firstName}
-              </h1>
-              <p className="mt-1 text-sm text-[#5F5668] dark:text-[#B8AFBE]">
-                Your personal AI coding coach and structured computer science curriculum.
-              </p>
-            </div>
-            <Link to="/app/journey">
-              <button className="inline-flex h-9 items-center gap-1.5 rounded-2xl bg-[#6542C5] hover:bg-[#51329F] dark:bg-[#B59AF7] dark:hover:bg-[#C6AFFB] px-4 text-xs font-bold text-white dark:text-[#141217] shadow-sm transition-colors">
-                <Compass size={14} /> Open Journey
-              </button>
-            </Link>
-          </div>
-
-          <SpotlightCard className="p-8 text-center max-w-2xl mx-auto space-y-4">
-            <div className="h-14 w-14 rounded-2xl bg-[#6542C5]/10 text-[#6542C5] dark:bg-[#B59AF7]/15 dark:text-[#B59AF7] flex items-center justify-center mx-auto">
-              <Sparkles size={28} />
-            </div>
-            <h2 className="font-space text-2xl font-bold text-[#211D28] dark:text-[#F5F0E8]">
-              Ready to start your learning path?
-            </h2>
-            <p className="text-sm text-[#5F5668] dark:text-[#B8AFBE] leading-relaxed max-w-md mx-auto">
-              You haven't set up a study plan yet. Start with our verified curriculum, or explore code comprehension drills and algorithmic challenges.
-            </p>
-            <div className="pt-2 flex items-center justify-center gap-3">
-              <Link to="/app/journey">
-                <button className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#6542C5] hover:bg-[#51329F] dark:bg-[#B59AF7] dark:hover:bg-[#C6AFFB] text-white dark:text-[#141217] font-bold text-xs px-5 shadow-sm transition-colors">
-                  <Compass size={15} /> Launch Arrays Fundamentals
-                </button>
-              </Link>
-              <Link to="/app/comprehension">
-                <button className="inline-flex h-11 items-center gap-2 rounded-2xl border border-[#D8D0C5] dark:border-white/10 bg-[#E8E1D7]/40 text-[#211D28] dark:text-[#F5F0E8] font-semibold text-xs px-5 hover:bg-[#E8E1D7] transition-colors">
-                  <GraduationCap size={15} /> Try Comprehension
-                </button>
-              </Link>
-            </div>
-          </SpotlightCard>
-        </div>
-      </AppLayout>
-    );
-  }
-
   return (
     <AppLayout>
       <ConfettiCanvas active={isPlanCompleted} />
 
       <div className="space-y-6">
+        {!plan && (
+          <div className="rounded-2xl border border-[#6542C5]/30 bg-[#F5F3FD] dark:bg-[#B59AF7]/10 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-[#6542C5]/20 text-[#6542C5] dark:text-[#B59AF7] flex items-center justify-center shrink-0">
+                <Sparkles size={17} />
+              </div>
+              <div>
+                <h4 className="font-space text-xs font-bold uppercase tracking-wider text-[#6542C5] dark:text-[#B59AF7]">
+                  Personalize Your Learning Goal
+                </h4>
+                <p className="text-xs text-[#5F5668] dark:text-[#B8AFBE] mt-0.5">
+                  Set target exam dates and daily hours to auto-generate adaptive study roadmaps.
+                </p>
+              </div>
+            </div>
+            <Link to="/app/plan">
+              <button className="px-3.5 py-1.5 rounded-xl bg-[#6542C5] hover:bg-[#51329F] text-white text-xs font-bold transition-colors shrink-0">
+                Create Study Plan
+              </button>
+            </Link>
+          </div>
+        )}
         {/* Welcome Header */}
         <Reveal variant="fade-up">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-[#D8D0C5] dark:border-white/10 pb-5">
@@ -258,7 +228,7 @@ export function Dashboard() {
 
                 <div>
                   <h2 className="font-space text-2xl sm:text-3xl font-bold tracking-tight">
-                    {plan.goalTitle || 'Data Structures & Algorithms'}
+                    {plan?.goalTitle || 'Data Structures & Algorithms'}
                   </h2>
                   <p className="mt-1 text-xs sm:text-sm opacity-85">
                     Current Focus:{' '}

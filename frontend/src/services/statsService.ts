@@ -65,8 +65,8 @@ export const statsService = {
       localDate: this.getUserLocalDate(),
     });
 
-    const res = (await fetchApi(`/stats/summary?${params.toString()}`)) as { data: StatsSummary };
-    return res.data;
+    const res = (await fetchApi(`/stats/summary?${params.toString()}`)) as any;
+    return res?.data ?? res;
   },
 };
 

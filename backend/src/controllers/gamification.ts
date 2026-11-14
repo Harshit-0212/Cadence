@@ -14,10 +14,11 @@ export const gamificationController = {
       // Compute server XP & stats for each user (single source of truth)
       const userProfiles = await Promise.all(
         users.map(async (u) => {
-          const stats = await computeUserStatsSummary(u.id);
+          const userId = u.id || String(u._id);
+          const stats = await computeUserStatsSummary(userId);
           const doc = {
-            userId: u.id,
-            name: u.full_name || 'Anonymous Scholar',
+            userId,
+            name: u.full_name || u.name || 'Anonymous Scholar',
             avatar: u.avatar_image,
             xp: stats.xp,
             level: stats.level,
@@ -27,14 +28,14 @@ export const gamificationController = {
 
           // Maintain user_stats collection
           await db.collection('user_stats').updateOne(
-            { userId: u.id },
+            { userId },
             { $set: doc },
             { upsert: true }
           );
 
           return {
             ...doc,
-            isUser: u.id === req.userId,
+            isUser: userId === req.userId,
           };
         })
       );

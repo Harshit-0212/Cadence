@@ -93,11 +93,14 @@ export async function computeUserStatsSummary(userId: string, timezone?: string,
   // 4. Study sessions & Focus minutes
   const studySessions = await db.collection('study_sessions').find({ userId }).toArray();
   const completedSessions = studySessions.filter((s) => s.status === 'completed');
-  const sessionsCompleted = completedSessions.length;
-  const sessionStudyMinutes = completedSessions.reduce(
+  const sessionEvents = activityEvents.filter((ev) => ev.type === 'session');
+  // Unified single source of truth for completed sessions
+  const sessionsCompleted = Math.max(completedSessions.length, sessionEvents.length);
+  const sessionMinutesDb = completedSessions.reduce(
     (sum, s) => sum + (Number(s.estimatedMinutes) || Number(s.durationMinutes) || 0),
     0
   );
+  const sessionStudyMinutes = Math.max(sessionMinutesDb, sessionEvents.length * 45);
 
   // Focus sessions points from activity_events (each focus event has points = Math.round(duration / 25), approx 25m per point)
   const focusEvents = activityEvents.filter((ev) => ev.type === 'focus' || ev.type === 'focus_minutes');

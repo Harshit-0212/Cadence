@@ -47,7 +47,7 @@ export const activityService = {
         localDate: this.getUserLocalDate(),
       }),
     })) as any;
-    return res.data;
+    return res?.data ?? res;
   },
 
   async recordFocus(
@@ -63,7 +63,7 @@ export const activityService = {
         localDate: this.getUserLocalDate(),
       }),
     })) as any;
-    return res.data;
+    return res?.data ?? res;
   },
 
   async recordActivity(
@@ -83,7 +83,7 @@ export const activityService = {
         localDate: this.getUserLocalDate(),
       }),
     })) as any;
-    return res.data;
+    return res?.data ?? res;
   },
 
   async getActivity(year?: number, month?: number, type?: string): Promise<ActivityResponse> {
@@ -95,7 +95,7 @@ export const activityService = {
     params.set('localDate', this.getUserLocalDate());
 
     const res = (await fetchApi(`/activity?${params.toString()}`)) as any;
-    return res.data;
+    return res?.data ?? res;
   },
 
   async rebuildActivity(): Promise<{ totalEventsCreated: number }> {
