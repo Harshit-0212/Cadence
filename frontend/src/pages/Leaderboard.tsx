@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Trophy, Flame, Award, Users, Star, ArrowUpRight } from 'lucide-react';
+import { Flame, Award } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { PageContainer, CardGrid } from '@/components/layout/PageContainer';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Avatar } from '@/components/ui/Avatar';
 import { useAppData } from '@/store/AppDataContext';
 import { useAuth } from '@/store/AuthContext';
+import { useStats } from '@/store/StatsContext';
 import { gamificationService } from '@/services/gamificationService';
 
 interface LeaderboardEntry {
@@ -33,38 +33,17 @@ export function Leaderboard() {
     gamificationService
       .getLeaderboard()
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setLeaders(data);
         } else {
-          // Fallback if brand new database
-          setLeaders([
-            {
-              rank: 1,
-              userId: user?.id || 'you',
-              name: user?.name || 'You',
-              xp: user?.xp || 100,
-              streak: 1,
-              level: user?.level || 1,
-              isUser: true,
-            },
-          ]);
+          setLeaders([]);
         }
       })
       .catch(() => {
-        setLeaders([
-          {
-            rank: 1,
-            userId: user?.id || 'you',
-            name: user?.name || 'You',
-            xp: user?.xp || 100,
-            streak: 1,
-            level: user?.level || 1,
-            isUser: true,
-          },
-        ]);
+        setLeaders([]);
       })
       .finally(() => setLoading(false));
-  }, [user]);
+  }, []);
 
   return (
     <AppLayout>

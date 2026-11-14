@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
 import { activityService } from '@/services/activityService';
 import { useToast } from '@/store/ToastContext';
+import { invalidateStats } from '@/store/StatsContext';
 
 export interface PomodoroState {
   isActive: boolean;
@@ -56,6 +57,40 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  const sessionIdRef = useRef<string | null>(null);
+  const sessionStartRef = useRef<number | null>(null);
+  const recordedSessionIdRef = useRef<string | null>(null);
+
+  // Helper to record focus time if session was active for at least 1 minute (60s)
+  const recordFocusSession = async (completedNormally = false) => {
+    if (stateRef.current.mode !== 'work') return;
+    const sessionId = sessionIdRef.current;
+    if (!sessionId || recordedSessionIdRef.current === sessionId) return;
+
+    const startMs =
+      sessionStartRef.current ||
+      (stateRef.current.endsAt ? stateRef.current.endsAt - stateRef.current.durationMinutes * 60000 : Date.now());
+    const elapsedSecs = Math.max(0, Math.round((Date.now() - startMs) / 1000));
+
+    // Must be at least 1 minute (60 seconds)
+    if (elapsedSecs < 60 && !completedNormally) {
+      return;
+    }
+
+    const elapsedMinutes = completedNormally
+      ? stateRef.current.durationMinutes
+      : Math.max(1, Math.round(elapsedSecs / 60));
+
+    recordedSessionIdRef.current = sessionId;
+
+    try {
+      await activityService.recordFocus(sessionId, elapsedMinutes);
+      invalidateStats();
+    } catch {
+      // Offline fallback
+    }
+  };
+
   // Persist state changes
   useEffect(() => {
     try {
@@ -87,15 +122,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
 
     if (completedMode === 'work') {
       showToast('Focus session complete! Take a well-deserved break.', 'success');
-      // Idempotently log activity points (1 point per 25 min)
-      const eventKey = `focus_${Date.now()}`;
-      try {
-        await activityService.recordActivity('focus', Math.max(1, Math.round(duration / 25)), {
-          minutes: duration,
-        }, eventKey);
-      } catch {
-        // Continue
-      }
+      await recordFocusSession(true);
       // Auto-switch to break
       const breakSecs = 5 * 60;
       setState({
@@ -154,6 +181,11 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   const startTimer = (durationMinutes = state.durationMinutes, mode: 'work' | 'break' = state.mode) => {
     const totalSecs = durationMinutes * 60;
     const endsAt = Date.now() + totalSecs * 1000;
+    if (mode === 'work') {
+      sessionIdRef.current = `focus_${Date.now()}`;
+      sessionStartRef.current = Date.now();
+      recordedSessionIdRef.current = null;
+    }
     setState({
       isActive: true,
       mode,
@@ -165,6 +197,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
 
   const pauseTimer = () => {
     if (!state.isActive) return;
+    recordFocusSession(false);
     setState((prev) => ({
       ...prev,
       isActive: false,
@@ -183,6 +216,7 @@ export function PomodoroProvider({ children }: { children: ReactNode }) {
   };
 
   const resetTimer = () => {
+    recordFocusSession(false);
     const totalSecs = state.durationMinutes * 60;
     setState((prev) => ({
       ...prev,

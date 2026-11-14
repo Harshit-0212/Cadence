@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
@@ -9,16 +9,14 @@ import {
   RotateCcw,
   Grid,
   Disc,
-  Info,
   X,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import {
   activityService,
   type ActivityResponse,
   type ActivityDailyData,
 } from '@/services/activityService';
+import { useStats } from '@/store/StatsContext';
 
 export interface ActivityHeatmapProps {
   compact?: boolean;
@@ -41,18 +39,28 @@ const FILTER_OPTIONS = [
   { id: 'flashcard', label: 'Flashcards' },
   { id: 'interview', label: 'Interviews' },
   { id: 'coding_submission', label: 'Coding' },
+  { id: 'focus_minutes', label: 'Focus' },
 ];
 
 export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
   const shouldReduceMotion = useReducedMotion();
+  const { activityData: sharedActivity, stats: sharedStats } = useStats();
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'radial' | 'grid'>('radial');
-  const [loading, setLoading] = useState<boolean>(true);
-  const [data, setData] = useState<ActivityResponse | null>(null);
+  const [loading, setLoading] = useState<boolean>(!sharedActivity);
+  const [data, setData] = useState<ActivityResponse | null>(sharedActivity);
   const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
   const [replayKey, setReplayKey] = useState<number>(0);
+
+  // Sync with shared activity data when viewing current year with 'all' filter
+  useEffect(() => {
+    if (selectedYear === currentYear && activeFilter === 'all' && sharedActivity) {
+      setData(sharedActivity);
+      setLoading(false);
+    }
+  }, [sharedActivity, selectedYear, activeFilter, currentYear]);
 
   // Portal tooltip state
   const [tooltip, setTooltip] = useState<{
@@ -70,6 +78,11 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
   });
 
   const loadData = async () => {
+    if (selectedYear === currentYear && activeFilter === 'all' && sharedActivity) {
+      setData(sharedActivity);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const res = await activityService.getActivity(selectedYear, undefined, activeFilter);
@@ -104,21 +117,6 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
     }
     return days;
   }, [selectedYear]);
-
-  // Points to level (0-5)
-  const getLevel = (points: number): number => {
-    if (!points || points <= 0) return 0;
-    if (points <= 2) return 1;
-    if (points <= 5) return 2;
-    if (points <= 9) return 3;
-    if (points <= 14) return 4;
-    return 5;
-  };
-
-  const getColor = (points: number) => {
-    const lvl = getLevel(points);
-    return COLOR_LEVELS[lvl];
-  };
 
   const handleCellHover = (e: React.MouseEvent, dateKey: string) => {
     const dayData = data?.dailyData?.[dateKey] || null;
@@ -243,7 +241,7 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
             <span>Current Streak</span>
           </div>
           <div className="mt-1 font-space text-2xl font-bold text-[#211D28] dark:text-[#F5F0E8]">
-            {data?.currentStreak ?? 0} <span className="text-xs font-normal">days</span>
+            {sharedStats?.currentStreak ?? data?.currentStreak ?? 0} <span className="text-xs font-normal">days</span>
           </div>
         </div>
 
@@ -253,7 +251,7 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
             <span>Longest Streak</span>
           </div>
           <div className="mt-1 font-space text-2xl font-bold text-[#211D28] dark:text-[#F5F0E8]">
-            {data?.longestStreak ?? 0} <span className="text-xs font-normal">days</span>
+            {sharedStats?.longestStreak ?? data?.longestStreak ?? 0} <span className="text-xs font-normal">days</span>
           </div>
         </div>
 
@@ -290,6 +288,7 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
             key={replayKey}
             days={daysOfYear}
             data={data}
+            streak={sharedStats?.currentStreak ?? data?.currentStreak ?? 0}
             compact={compact}
             shouldReduceMotion={shouldReduceMotion}
             onHover={handleCellHover}
@@ -416,6 +415,7 @@ export function ActivityHeatmap({ compact = false }: ActivityHeatmapProps) {
 function RadialHeatmapView({
   days,
   data,
+  streak,
   compact,
   shouldReduceMotion,
   onHover,
@@ -424,6 +424,7 @@ function RadialHeatmapView({
 }: {
   days: { dateKey: string; month: number; day: number; dayOfWeek: number }[];
   data: ActivityResponse | null;
+  streak: number;
   compact: boolean;
   shouldReduceMotion: boolean | null;
   onHover: (e: React.MouseEvent, dateKey: string) => void;
@@ -536,7 +537,7 @@ function RadialHeatmapView({
           className="text-center"
         >
           <span className="font-space text-3xl font-bold text-[#6542C5] dark:text-[#B59AF7]">
-            {data?.currentStreak ?? 0}
+            {streak}
           </span>
           <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8A8192]">
             Day Streak

@@ -45,12 +45,7 @@ export function CalendarPage() {
   // Drag-and-drop state for undo
   const [draggedEvent, setDraggedEvent] = useState<CalendarEvent | null>(null);
 
-  const [events, setEvents] = useState<CalendarEvent[]>([
-    { id: '1', title: 'Data Structures - Trees & Graphs', date: new Date().toISOString().slice(0, 10), type: 'session', time: '10:00 AM' },
-    { id: '2', title: 'Operating Systems Mock Quiz', date: new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10), type: 'mocktest', time: '02:00 PM' },
-    { id: '3', title: 'Daily Flashcards Deck', date: new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 10), type: 'flashcard', time: '06:00 PM' },
-    { id: '4', title: 'System Design Interview Practice', date: new Date(Date.now() + 86400000 * 5).toISOString().slice(0, 10), type: 'interview', time: '11:00 AM' },
-  ]);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
 
   useEffect(() => {
     async function loadEvents() {
@@ -64,13 +59,12 @@ export function CalendarPage() {
             type: (ev.type === 'mock-test' ? 'mocktest' : ev.type) as any,
             time: '10:00 AM',
           }));
-          setEvents((prev) => {
-            const ids = new Set(mapped.map((m) => m.id));
-            return [...mapped, ...prev.filter((p) => !ids.has(p.id))];
-          });
+          setEvents(mapped);
+        } else {
+          setEvents([]);
         }
       } catch {
-        // Keeps state
+        setEvents([]);
       }
     }
     loadEvents();

@@ -1,8 +1,10 @@
-﻿import { executeCodeSync } from '../lib/codeExecution.js';
+import { executeCodeSync } from '../lib/codeExecution.js';
 import type { Response } from 'express';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { codingProblemStore, newSubmissionId, type StoredCodingSubmission } from '../lib/codingStore.js';
 import { studentProgressStore, journeyStore } from '../lib/journeyStore.js';
+import { activityStore } from '../lib/activityStore.js';
+import { emitToUser } from '../lib/socket.js';
 import type {
   ProblemDifficulty,
   PublicCodingProblemListItem,
@@ -318,6 +320,26 @@ export const studentCodingController = {
 
     // Record submission history
     await codingProblemStore.recordSubmission(submissionRecord);
+
+    // Record activity event for coding submission (points: 3 for accepted, 1 for attempt)
+    const today = new Date().toISOString().slice(0, 10);
+    const codingPoints = overallVerdict === 'accepted' ? 3 : 1;
+    await activityStore.recordActivity(
+      userId,
+      'coding_submission',
+      today,
+      codingPoints,
+      {
+        submissionId,
+        problemSlug: problem.slug,
+        problemTitle: problem.title,
+        verdict: overallVerdict,
+        passedTests,
+        totalTests: allCases.length,
+      },
+      `coding_submission:${submissionId}`
+    );
+    emitToUser(userId, 'stats:invalidate', { reason: 'coding_submission', submissionId, verdict: overallVerdict });
 
     // If verdict is accepted, record in student journey progress if active journey exists
     if (overallVerdict === 'accepted') {

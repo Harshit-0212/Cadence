@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/store/ToastContext';
 import { learningFeaturesService, type MistakeRecord } from '@/services/learningFeaturesService';
+import { invalidateStats } from '@/store/StatsContext';
 
 interface MistakeItem {
   id: string;
@@ -85,6 +86,7 @@ export function Mistakes() {
     }
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, resolved: true } : item)));
     showToast('Marked mistake as resolved! +15 XP earned.', 'success');
+    invalidateStats();
   };
 
   const filtered = items.filter((item) => {

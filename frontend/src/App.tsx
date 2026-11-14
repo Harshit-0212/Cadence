@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { AnimatePresence, motion } from 'framer-motion';
 import { AuthProvider, useAuth } from '@/store/AuthContext';
 import { AppDataProvider } from '@/store/AppDataContext';
+import { StatsProvider } from '@/store/StatsContext';
 import { NotificationProvider } from '@/store/NotificationContext';
 import { ThemeProvider } from '@/store/ThemeContext';
 import { ToastProvider } from '@/store/ToastContext';
@@ -164,6 +165,22 @@ function AppRoutes() {
           />
           <Route
             path="/app/assessments"
+            element={
+              <ProtectedRoute>
+                <Assessments />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/assessments/results/:attemptId"
+            element={
+              <ProtectedRoute>
+                <Assessments />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mocktest/results/:attemptId"
             element={
               <ProtectedRoute>
                 <Assessments />
@@ -342,9 +359,11 @@ export default function App() {
             <AuthProvider>
               <NotificationProvider>
                 <AppDataProvider>
-                  <BrowserRouter>
-                    <AppRoutes />
-                  </BrowserRouter>
+                  <StatsProvider>
+                    <BrowserRouter>
+                      <AppRoutes />
+                    </BrowserRouter>
+                  </StatsProvider>
                 </AppDataProvider>
               </NotificationProvider>
             </AuthProvider>

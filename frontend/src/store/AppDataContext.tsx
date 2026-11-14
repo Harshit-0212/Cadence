@@ -19,6 +19,7 @@ import { mockTestService } from '@/services/mockTestService';
 import { documentService } from '@/services/documentService';
 import { useToast } from '@/store/ToastContext';
 import { clearStorage } from '@/utils/storage';
+import { invalidateStats } from '@/store/StatsContext';
 
 // These keys held goals/plans/progress client-side before that data moved to MongoDB.
 // Nothing writes to them anymore; this purges any leftovers from older sessions.
@@ -173,6 +174,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setPlan(updated);
     showToast('Session marked complete. Great work!');
     await refreshProgress();
+    invalidateStats();
   };
 
   const rescheduleSession = async (sessionId: string, newDate: string) => {
@@ -210,6 +212,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const result = await mockTestService.submitTest(test, { answers }, timeSpentSeconds);
     showToast('Mock test submitted.');
     await refreshProgress();
+    invalidateStats();
     return result;
   };
 

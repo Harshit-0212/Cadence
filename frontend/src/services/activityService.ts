@@ -50,6 +50,22 @@ export const activityService = {
     return res.data;
   },
 
+  async recordFocus(
+    sessionId: string,
+    durationMinutes: number
+  ): Promise<{ recorded: boolean; currentStreak: number; longestStreak: number; minutes: number; points: number }> {
+    const res = (await fetchApi('/activity/focus', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId,
+        durationMinutes,
+        timezone: this.getUserTimezone(),
+        localDate: this.getUserLocalDate(),
+      }),
+    })) as any;
+    return res.data;
+  },
+
   async recordActivity(
     type: string,
     points?: number,
@@ -79,6 +95,13 @@ export const activityService = {
     params.set('localDate', this.getUserLocalDate());
 
     const res = (await fetchApi(`/activity?${params.toString()}`)) as any;
+    return res.data;
+  },
+
+  async rebuildActivity(): Promise<{ totalEventsCreated: number }> {
+    const res = (await fetchApi('/activity/backfill', {
+      method: 'POST',
+    })) as any;
     return res.data;
   },
 };

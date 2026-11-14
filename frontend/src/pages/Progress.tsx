@@ -1,59 +1,116 @@
 import { motion } from 'framer-motion';
-import { TrendingUp, Flame, Clock, BookOpen, Target, Calendar, Award } from 'lucide-react';
+import { Flame, Clock, BookOpen, Target, Award, AlertCircle, RefreshCw } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressRing } from '@/components/ui/ProgressRing';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
-import { EmptyState } from '@/components/ui/EmptyState';
 import { Reveal, Stagger, StaggerItem } from '@/components/ui/Reveal';
 import { ActivityHeatmap } from '@/components/ui/ActivityHeatmap';
 import { useAppData } from '@/store/AppDataContext';
+import { useStats } from '@/store/StatsContext';
 
 export function Progress() {
   const { progress, plan, achievements } = useAppData();
+  const { stats, loading: statsLoading, error: statsError, refreshStats } = useStats();
 
-  if (!progress) {
+  if (statsLoading && !stats) {
     return (
       <AppLayout>
-        <div className="p-4 sm:p-6 lg:p-8">
-          <PageHeader title="Progress" />
-          <EmptyState
-            icon={TrendingUp}
-            title="No progress data yet"
-            description="Start studying and taking quizzes to see your progress here."
-          />
+        <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+          <PageHeader title="Progress & Stats" subtitle="Loading metrics from database..." />
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-28 rounded-2xl bg-ink-100 dark:bg-ink-800 animate-pulse" />
+            ))}
+          </div>
+          <div className="h-64 rounded-2xl bg-ink-100 dark:bg-ink-800 animate-pulse" />
         </div>
       </AppLayout>
     );
   }
 
+  if (statsError && !stats) {
+    return (
+      <AppLayout>
+        <div className="p-4 sm:p-6 lg:p-8">
+          <PageHeader title="Progress & Stats" />
+          <div className="max-w-md mx-auto my-12 rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 p-6 text-center space-y-4">
+            <AlertCircle size={36} className="mx-auto text-red-500" />
+            <h3 className="font-space text-lg font-bold text-red-900 dark:text-red-200">
+              Failed to load stats
+            </h3>
+            <p className="text-xs text-red-700 dark:text-red-300">
+              {statsError}
+            </p>
+            <button
+              onClick={() => refreshStats()}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-colors"
+            >
+              <RefreshCw size={14} /> Retry Connection
+            </button>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const overall = stats
+    ? Math.min(100, Math.round(stats.testsTaken * 10 + stats.sessionsCompleted * 5))
+    : (progress?.overallCompletion ?? 0);
+  const streak = stats?.currentStreak ?? 0;
+  const hours = stats ? parseFloat((stats.studyMinutes / 60).toFixed(1)) : (progress?.hoursStudied ?? 0);
+  const topicsMastered = stats?.flashcardsMastered ?? progress?.topicsMastered ?? 0;
   const daysLeft = plan ? Math.ceil((new Date(plan.examDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
 
   return (
     <AppLayout>
       <div className="p-4 sm:p-6 lg:p-8">
         <Reveal variant="fade-in">
-          <PageHeader title="Progress" subtitle="Track your study time, mastery, and accuracy trends." />
+          <PageHeader title="Progress & Stats" subtitle="Real-time mastery, activity history, and study streaks." />
         </Reveal>
 
-        {/* Top stats */}
+        {/* Primary Platform Stats (Single Source of Truth) */}
         <Stagger className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4" delay={0.05}>
-          <StaggerItem><StatCard icon={Target} label="Overall" value={progress.overallCompletion} suffix="%" color="primary" /></StaggerItem>
-          <StaggerItem><StatCard icon={Flame} label="Streak" value={progress.streakDays} suffix=" days" color="warning" /></StaggerItem>
+          <StaggerItem><StatCard icon={Target} label="Overall Completion" value={overall} suffix="%" color="primary" /></StaggerItem>
+          <StaggerItem><StatCard icon={Flame} label="Current Streak" value={streak} suffix=" days" color="warning" /></StaggerItem>
           <StaggerItem>
             <StatCard
               icon={Clock}
-              label="Hours Studied"
-              value={progress.hoursStudied}
+              label="Study Time"
+              value={hours}
               suffix="h"
               decimals={1}
               color="accent"
             />
           </StaggerItem>
-          <StaggerItem><StatCard icon={BookOpen} label="Topics Mastered" value={progress.topicsMastered} color="success" /></StaggerItem>
+          <StaggerItem><StatCard icon={BookOpen} label="Flashcards Mastered" value={topicsMastered} color="success" /></StaggerItem>
         </Stagger>
+
+        {/* Secondary Real Activity Metrics */}
+        {stats && (
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-ink-900 border border-ink-100 dark:border-ink-800">
+              <span className="text-[10px] uppercase font-bold text-ink-400">Mock Tests Taken</span>
+              <p className="font-space text-xl font-bold text-ink-900 dark:text-ink-50 mt-0.5">{stats.testsTaken}</p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-ink-900 border border-ink-100 dark:border-ink-800">
+              <span className="text-[10px] uppercase font-bold text-ink-400">Average Quiz Score</span>
+              <p className="font-space text-xl font-bold text-ink-900 dark:text-ink-50 mt-0.5">
+                {stats.testsTaken > 0 ? `${stats.averageScore}%` : '--'}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-ink-900 border border-ink-100 dark:border-ink-800">
+              <span className="text-[10px] uppercase font-bold text-ink-400">Active Days</span>
+              <p className="font-space text-xl font-bold text-ink-900 dark:text-ink-50 mt-0.5">{stats.activeDaysCount}</p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-ink-900 border border-ink-100 dark:border-ink-800">
+              <span className="text-[10px] uppercase font-bold text-ink-400">Coding Solved</span>
+              <p className="font-space text-xl font-bold text-ink-900 dark:text-ink-50 mt-0.5">{stats.codingAcceptedCount}</p>
+            </div>
+          </div>
+        )}
 
         {/* Activity Spectrum Heatmap */}
         <div className="mt-5">
@@ -65,29 +122,29 @@ export function Progress() {
           {/* Overall ring */}
           <Card padding="lg" className="flex flex-col items-center" hover>
             <ProgressRing
-              value={progress.overallCompletion}
+              value={overall}
               size={160}
-              label={`${progress.overallCompletion}%`}
+              label={`${overall}%`}
               sublabel="overall"
             />
             <p className="mt-4 text-center text-sm text-ink-500 dark:text-ink-400">
-              {daysLeft > 0 ? `${daysLeft} days to your exam` : 'Exam period'}
+              {daysLeft > 0 ? `${daysLeft} days to your exam` : 'Ongoing Curriculum'}
             </p>
           </Card>
 
           {/* Weekly activity */}
           <Card hover className="lg:col-span-2">
             <CardHeader title="Weekly Study Activity" subtitle="Minutes studied per day" />
-            <WeeklyChart data={progress.weeklyActivity} />
+            <WeeklyChart data={progress?.weeklyActivity || []} />
             <div className="mt-4 flex items-center justify-between border-t border-ink-200 pt-4 dark:border-ink-800">
               <div>
                 <p className="text-xs text-ink-400">Consistency</p>
                 <p className="font-display text-xl font-bold text-ink-900 dark:text-ink-50">
-                  {progress.consistencyPercent}%
+                  {progress?.consistencyPercent ?? (stats?.activeDaysCount ? Math.min(100, stats.activeDaysCount * 14) : 0)}%
                 </p>
               </div>
-              <Badge tone={progress.consistencyPercent >= 80 ? 'success' : 'warning'}>
-                {progress.consistencyPercent >= 80 ? 'On track' : 'Needs improvement'}
+              <Badge tone={(progress?.consistencyPercent ?? 0) >= 80 ? 'success' : 'neutral'}>
+                {(progress?.consistencyPercent ?? 0) >= 80 ? 'On track' : 'In Progress'}
               </Badge>
             </div>
           </Card>
@@ -98,36 +155,42 @@ export function Progress() {
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           <Card hover>
             <CardHeader title="Quiz Accuracy Trend" subtitle="Week-over-week improvement" />
-            <AccuracyChart data={progress.quizAccuracyTrend} />
+            <AccuracyChart data={progress?.quizAccuracyTrend || []} />
           </Card>
 
           <Card hover>
             <CardHeader title="Topic Strength" subtitle="Mastery by topic" />
             <div className="space-y-3">
-              {progress.topicStrengths.map((t) => (
-                <div key={t.id}>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span className="text-ink-700 dark:text-ink-200">{t.name}</span>
-                    <span className="font-semibold text-ink-900 dark:text-ink-50">{t.strength}%</span>
+              {(progress?.topicStrengths || []).length > 0 ? (
+                progress!.topicStrengths.map((t) => (
+                  <div key={t.id}>
+                    <div className="mb-1 flex justify-between text-sm">
+                      <span className="text-ink-700 dark:text-ink-200">{t.name}</span>
+                      <span className="font-semibold text-ink-900 dark:text-ink-50">{t.strength}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-ink-100 dark:bg-ink-800">
+                      <motion.div
+                        className={`h-full rounded-full ${
+                          t.strengthLabel === 'critical'
+                            ? 'bg-error-500'
+                            : t.strengthLabel === 'weak'
+                              ? 'bg-warning-500'
+                              : t.strengthLabel === 'moderate'
+                                ? 'bg-accent-500'
+                                : 'bg-success-500'
+                        }`}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${t.strength}%` }}
+                        transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
+                      />
+                    </div>
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-ink-100 dark:bg-ink-800">
-                    <motion.div
-                      className={`h-full rounded-full ${
-                        t.strengthLabel === 'critical'
-                          ? 'bg-error-500'
-                          : t.strengthLabel === 'weak'
-                            ? 'bg-warning-500'
-                            : t.strengthLabel === 'moderate'
-                              ? 'bg-accent-500'
-                              : 'bg-success-500'
-                      }`}
-                      initial={{ width: 0 }}
-                      animate={{ width: `${t.strength}%` }}
-                      transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
-                    />
-                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center text-xs text-ink-400">
+                  Take mock quizzes and coding problems to track topic strength.
                 </div>
-              ))}
+              )}
             </div>
           </Card>
         </div>

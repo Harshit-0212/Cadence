@@ -5,6 +5,8 @@ import { extractDocument, ExtractionError } from '../lib/extractText.js';
 import { analyzeDocument, generateQuestionsFromDocument, GeminiError } from '../lib/gemini.js';
 import { documentStore } from '../lib/documentStore.js';
 import { mockTestSessionStore } from '../lib/mockTestSessions.js';
+import { activityStore } from '../lib/activityStore.js';
+import { emitToUser } from '../lib/socket.js';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 
 export const documentsRouter = Router();
@@ -63,6 +65,18 @@ documentsRouter.post('/analyze', requireAuth, (req: AuthedRequest, res) => {
         createdAt: Date.now(),
       });
 
+      // Record document upload activity event
+      const dateKey = new Date().toISOString().slice(0, 10);
+      await activityStore.recordActivity(
+        req.userId!,
+        'document',
+        dateKey,
+        1,
+        { title: `Uploaded: ${req.file.originalname}`, documentId },
+        `doc:${documentId}`
+      );
+      emitToUser(req.userId!, 'stats:invalidate', { reason: 'document_uploaded', documentId });
+
       res.json({ data: { documentId, fileName: req.file.originalname, analysis } });
     } catch (err) {
       if (err instanceof ExtractionError) {
@@ -101,7 +115,7 @@ documentsRouter.post('/generate-test', requireAuth, async (req: AuthedRequest, r
       numQuestions: count,
       difficulty: diff,
     });
-    const session = mockTestSessionStore.create(req.userId!, doc.fileName, questions);
+    const session = await mockTestSessionStore.create(req.userId!, doc.fileName, questions);
     res.json({ data: { fileName: doc.fileName, testId: session.id, questions: session.questions } });
   } catch (err) {
     if (err instanceof GeminiError) {

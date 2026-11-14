@@ -52,14 +52,18 @@ function loadViewport(journeySlug: string): Viewport {
   try {
     const stored = localStorage.getItem(VIEWPORT_KEY(journeySlug));
     if (stored) return JSON.parse(stored) as Viewport;
-  } catch {}
+  } catch {
+    // Ignore storage parse failure
+  }
   return DEFAULT_VIEWPORT;
 }
 
 function saveViewport(journeySlug: string, vp: Viewport) {
   try {
     localStorage.setItem(VIEWPORT_KEY(journeySlug), JSON.stringify(vp));
-  } catch {}
+  } catch {
+    // Ignore storage write failure
+  }
 }
 
 const NODE_STYLES: Record<

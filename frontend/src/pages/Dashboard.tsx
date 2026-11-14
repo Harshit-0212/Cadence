@@ -6,19 +6,13 @@ import {
   ArrowRight,
   Brain,
   RefreshCw,
-  FileText,
   Compass,
-  Code,
   GraduationCap,
-  Target,
-  BookOpen,
   Flame,
   Shield,
-  Award,
   CheckCircle2,
   Clock,
   Play,
-  RotateCcw,
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/store/AuthContext';
@@ -33,27 +27,39 @@ import { SpotlightCard } from '@/components/ui/SpotlightCard';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import { ProgressRing } from '@/components/ui/ProgressRing';
 import { Reveal, Stagger } from '@/components/ui/Reveal';
-import { Chip } from '@/components/ui/Chip';
 import { ConfettiCanvas } from '@/components/ui/ConfettiCanvas';
 import { ActivityHeatmap } from '@/components/ui/ActivityHeatmap';
-import { gamificationService, type UserGamificationData } from '@/services/gamificationService';
+import { useStats } from '@/store/StatsContext';
+import { mockTestStore } from '@/store/MockTestStore';
 import { learningFeaturesService } from '@/services/learningFeaturesService';
-import { Layers, Calendar, BrainCircuit } from 'lucide-react';
+import { Layers, Calendar, BrainCircuit, AlertCircle } from 'lucide-react';
 
 export function Dashboard() {
   const { user } = useAuth();
   const { plan, progress, weakTopics, isReady, autoAdjustPlan } = useAppData();
-  const [gamification, setGamification] = useState<UserGamificationData | null>(null);
-  const [dueCardsCount, setDueCardsCount] = useState<number>(3);
-  const [nextCalendarEvent, setNextCalendarEvent] = useState<string>('Operating Systems Mock Quiz');
-  const [lastInterviewScore, setLastInterviewScore] = useState<number | null>(84);
+  const { stats, error: statsError, refreshStats } = useStats();
+  const [activeTest, setActiveTest] = useState<ReturnType<typeof mockTestStore.getActiveTest>>(null);
+  const [nextCalendarEvent, setNextCalendarEvent] = useState<string>('Upcoming Study Session');
 
   useEffect(() => {
-    gamificationService.getProfile().then(setGamification).catch(() => {});
-    learningFeaturesService.getDueFlashcards().then((c) => c && setDueCardsCount(c.length)).catch(() => {});
-    learningFeaturesService.getCalendarEvents().then((evs) => evs && evs.length > 0 && setNextCalendarEvent(evs[0].title)).catch(() => {});
-    learningFeaturesService.getInterviewReports().then((r) => r && r.length > 0 && setLastInterviewScore(r[0].overallScore)).catch(() => {});
+    const saved = mockTestStore.getActiveTest();
+    if (saved && saved.timerEndsAt > Date.now()) {
+      setActiveTest(saved);
+    } else {
+      setActiveTest(null);
+    }
   }, []);
+
+  useEffect(() => {
+    learningFeaturesService.getCalendarEvents().then((evs) => {
+      if (evs && evs.length > 0) {
+        setNextCalendarEvent(evs[0].title);
+      } else if (plan?.sessions?.length) {
+        const next = plan.sessions.find((s) => s.status === 'upcoming');
+        if (next) setNextCalendarEvent(next.topic);
+      }
+    }).catch(() => {});
+  }, [plan]);
 
   const firstName = user?.name ? user.name.split(' ')[0] : 'Learner';
 
@@ -70,8 +76,10 @@ export function Dashboard() {
   const overallPercent = plan?.completionPercent ?? progress?.overallCompletion ?? 0;
   const isPlanCompleted = overallPercent >= 100;
 
-  // Real streak calculation derived from backend gamification/progress
-  const streakDays = gamification?.currentStreak ?? progress?.streakDays ?? 0;
+  // Single Source of Truth for streak
+  const streakDays = stats?.currentStreak ?? 0;
+  const dueCardsCount = stats?.flashcardsDue ?? 0;
+  const lastInterviewScore = stats?.interviewAverageScore ? stats.interviewAverageScore : null;
 
   if (!isReady) {
     return (
@@ -189,6 +197,48 @@ export function Dashboard() {
           </Reveal>
         )}
 
+        {/* Active Mock Test Resume Banner */}
+        {activeTest && (
+          <Reveal variant="fade-up">
+            <div className="rounded-2xl border border-[#6542C5]/30 dark:border-[#B59AF7]/30 bg-[#F5F3FD] dark:bg-[#B59AF7]/10 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#6542C5]/20 text-[#6542C5] dark:text-[#B59AF7] shrink-0">
+                  <Play size={17} />
+                </div>
+                <div>
+                  <h4 className="font-space text-xs font-bold uppercase tracking-wider text-[#6542C5] dark:text-[#B59AF7]">
+                    Mock Test In Progress: {activeTest.subject}
+                  </h4>
+                  <p className="text-xs text-[#5F5668] dark:text-[#B8AFBE] mt-0.5">
+                    You have an ongoing test. Your answers and timer are saved.
+                  </p>
+                </div>
+              </div>
+              <Link to="/app/assessments">
+                <button className="px-3.5 py-1.5 rounded-xl bg-[#6542C5] hover:bg-[#51329F] dark:bg-[#B59AF7] dark:hover:bg-[#C6AFFB] text-white dark:text-[#141217] text-xs font-bold transition-colors shrink-0 flex items-center gap-1.5">
+                  <Play size={13} /> Resume Test
+                </button>
+              </Link>
+            </div>
+          </Reveal>
+        )}
+
+        {/* Stats Error Notification with Retry */}
+        {statsError && (
+          <div className="rounded-2xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 p-4 flex items-center justify-between gap-3 text-red-800 dark:text-red-300">
+            <div className="flex items-center gap-2 text-xs">
+              <AlertCircle size={15} />
+              <span>Could not refresh real-time stats: {statsError}</span>
+            </div>
+            <button
+              onClick={() => refreshStats()}
+              className="text-xs font-bold underline hover:no-underline flex items-center gap-1"
+            >
+              <RefreshCw size={12} /> Retry
+            </button>
+          </div>
+        )}
+
         {/* ============================================================
             12-COLUMN RESPONSIVE BENTO GRID (Phase 5)
             ============================================================ */}
@@ -236,7 +286,9 @@ export function Dashboard() {
                       <Clock size={12} /> ~{todaySession?.estimatedMinutes || 45} min estimated
                     </span>
                     <span>
-                      {todaySession?.conceptsDone ?? 0} of {todaySession?.conceptsTotal ?? 10} concepts completed
+                      {(todaySession?.conceptsTotal ?? 0) > 0
+                        ? `${todaySession?.conceptsDone ?? 0} of ${todaySession?.conceptsTotal} concepts completed`
+                        : `${todaySession?.conceptsDone ?? 0} concepts completed`}
                     </span>
                   </div>
                 </div>
@@ -373,7 +425,7 @@ export function Dashboard() {
                     <AnimatedNumber value={streakDays} suffix={streakDays === 1 ? ' day' : ' days'} />
                   </p>
                   <p className="text-[11px] text-[#5F5668] dark:text-[#B8AFBE] mt-0.5">
-                    {gamification?.streakFreezesAvailable ?? 1} freeze available
+                    {stats?.activeDaysCount ? `${stats.activeDaysCount} active days recorded` : 'Consistency in progress'}
                   </p>
                 </div>
                 <div className="h-12 w-12 rounded-2xl bg-[#F2B38C]/15 text-[#D7713A] dark:text-[#F2B38C] flex items-center justify-center">

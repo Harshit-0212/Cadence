@@ -92,7 +92,7 @@ export const gamificationStore = {
   async getProfile(userId: string): Promise<UserGamificationProfile> {
     const db = await getDb();
     const col = db.collection<UserGamificationProfile>(COLLECTION);
-    let doc = await col.findOne({ userId });
+    const doc = await col.findOne({ userId });
     const currentWeekStart = getMonday();
 
     if (!doc) {

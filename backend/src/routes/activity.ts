@@ -1,6 +1,8 @@
 import { Router, type Response } from 'express';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 import { activityStore, type ActivityEventType } from '../lib/activityStore.js';
+import { backfillUserActivity } from '../lib/activityBackfill.js';
+import { emitToUser } from '../lib/socket.js';
 
 export const activityRouter = Router();
 activityRouter.use(requireAuth);
@@ -29,6 +31,8 @@ activityRouter.post('/checkin', async (req: AuthedRequest, res: Response) => {
   // Record app_open (1 point, idempotent per day)
   await activityStore.recordActivity(userId, 'app_open', dateKey, 1, { timezone }, `app_open:${dateKey}`);
 
+  emitToUser(userId, 'stats:invalidate', { reason: 'checkin' });
+
   const streak = await activityStore.computeStreak(userId, dateKey);
   res.json({
     data: {
@@ -56,6 +60,7 @@ activityRouter.post('/record', async (req: AuthedRequest, res: Response) => {
     'mistake_retry',
     'tutor',
     'focus',
+    'focus_minutes',
     'document',
     'app_open',
     'coding_submission',
@@ -84,6 +89,7 @@ activityRouter.post('/record', async (req: AuthedRequest, res: Response) => {
     mistake_retry: 1,
     tutor: 1,
     focus: 1,
+    focus_minutes: 1,
     document: 1,
     app_open: 1,
     coding_submission: 3,
@@ -92,11 +98,68 @@ activityRouter.post('/record', async (req: AuthedRequest, res: Response) => {
   const finalPoints = typeof points === 'number' && points >= 0 ? points : defaultPoints[type as ActivityEventType];
 
   const recorded = await activityStore.recordActivity(userId, type, dateKey, finalPoints, meta, eventKey);
+  emitToUser(userId, 'stats:invalidate', { reason: type });
   const streak = await activityStore.computeStreak(userId, dateKey);
 
   res.json({
     data: {
       recorded,
+      currentStreak: streak.currentStreak,
+      longestStreak: streak.longestStreak,
+    },
+  });
+});
+
+/**
+ * POST /api/activity/focus
+ * Idempotently records a focus session activity event (type 'focus_minutes').
+ * Uses sessionId as eventKey.
+ */
+activityRouter.post('/focus', async (req: AuthedRequest, res: Response) => {
+  const userId = req.userId!;
+  const { sessionId, durationMinutes, localDate, timezone } = req.body || {};
+
+  if (!sessionId) {
+    res.status(400).json({ error: { message: 'sessionId is required.' } });
+    return;
+  }
+
+  const minutes = typeof durationMinutes === 'number' && durationMinutes > 0 ? Math.round(durationMinutes) : 25;
+  const points = Math.max(1, Math.round(minutes / 25));
+
+  let dateKey = typeof localDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(localDate) ? localDate : '';
+  if (!dateKey) {
+    try {
+      const tz = typeof timezone === 'string' && timezone ? timezone : 'UTC';
+      dateKey = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+    } catch {
+      dateKey = new Date().toISOString().slice(0, 10);
+    }
+  }
+
+  const recorded = await activityStore.recordActivity(
+    userId,
+    'focus_minutes',
+    dateKey,
+    points,
+    {
+      sessionId,
+      durationMinutes: minutes,
+      minutes,
+      title: `Focus Session (${minutes}m)`,
+    },
+    `focus:${sessionId}`
+  );
+
+  emitToUser(userId, 'stats:invalidate', { reason: 'focus_completed', sessionId });
+  const streak = await activityStore.computeStreak(userId, dateKey);
+
+  res.json({
+    data: {
+      recorded,
+      sessionId,
+      minutes,
+      points,
       currentStreak: streak.currentStreak,
       longestStreak: streak.longestStreak,
     },
@@ -128,4 +191,21 @@ activityRouter.get('/', async (req: AuthedRequest, res: Response) => {
   const data = await activityStore.getActivityData(userId, userToday, yearNum, monthNum, typeStr);
   res.json({ data });
 });
+
+/**
+ * POST /api/activity/backfill
+ * Rebuilds activity events from all historical assessments, sessions, interviews, etc.
+ */
+activityRouter.post('/backfill', async (req: AuthedRequest, res: Response) => {
+  const userId = req.userId!;
+  try {
+    const result = await backfillUserActivity(userId);
+    emitToUser(userId, 'stats:invalidate', { reason: 'backfill' });
+    res.json({ data: result });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Backfill failed';
+    res.status(500).json({ error: { message: msg } });
+  }
+});
+
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Moon, Sun, Bell, Clock, Target, LogOut, Trash2, ChevronRight } from 'lucide-react';
+import { Moon, Sun, Bell, Clock, Target, LogOut, Trash2, ChevronRight, RefreshCw, Database } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -10,17 +10,21 @@ import { AISettingsCard } from '@/components/settings/AISettingsCard';
 import { useTheme } from '@/store/ThemeContext';
 import { useAuth } from '@/store/AuthContext';
 import { useToast } from '@/store/ToastContext';
-import { Reveal, Stagger, StaggerItem } from '@/components/ui/Reveal';
+import { useStats } from '@/store/StatsContext';
+import { activityService } from '@/services/activityService';
+import { Reveal, Stagger } from '@/components/ui/Reveal';
 
 export function Settings() {
   const { theme, toggleTheme } = useTheme();
   const { logout, user } = useAuth();
+  const { refreshStats } = useStats();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
   const [notifications, setNotifications] = useState(true);
   const [reminderTime, setReminderTime] = useState('18:00');
   const [dailyTarget, setDailyTarget] = useState(120);
+  const [rebuilding, setRebuilding] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -29,6 +33,20 @@ export function Settings() {
 
   const handleDelete = () => {
     showToast('Account deletion is disabled in the demo.');
+  };
+
+  const handleRebuildActivity = async () => {
+    setRebuilding(true);
+    try {
+      const res = await activityService.rebuildActivity();
+      await refreshStats();
+      showToast(`Activity rebuilt: ${res.totalEventsCreated ?? 0} events synced.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Rebuild failed';
+      showToast(`Failed to rebuild activity: ${msg}`, 'error');
+    } finally {
+      setRebuilding(false);
+    }
   };
 
   return (
@@ -130,6 +148,32 @@ export function Settings() {
 
           {/* AI Settings / Connect Gemini */}
           <AISettingsCard />
+
+          {/* Activity Data Sync & Repair */}
+          <Card padding="lg">
+            <CardHeader title="Activity & Streaks" subtitle="Synchronize historical progress & activity events" />
+            <div className="space-y-3">
+              <div className="flex items-start gap-3 rounded-xl border border-ink-200 p-4 dark:border-ink-700">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-50 text-[#6542C5] dark:bg-primary-900/40 shrink-0">
+                  <Database size={20} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-ink-900 dark:text-ink-50">Rebuild Activity Timeline</p>
+                  <p className="text-xs text-ink-400 mt-0.5">
+                    Scans all past test results, completed sessions, interview reports, documents, and flashcard reviews to reconstruct any missing activity events and recalculate your daily contribution graph and streak.
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                fullWidth
+                loading={rebuilding}
+                onClick={handleRebuildActivity}
+              >
+                <RefreshCw size={16} /> Rebuild Activity History
+              </Button>
+            </div>
+          </Card>
 
           {/* Account */}
           <Card padding="lg">

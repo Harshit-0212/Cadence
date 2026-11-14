@@ -1,54 +1,109 @@
+import { getDb } from './db.js';
 import type { GeneratedQuestion } from './gemini.js';
 
 export interface StoredMockTestQuestion extends GeneratedQuestion {
   id: string;
 }
 
-interface StoredMockTestSession {
+export interface StoredMockTestSession {
   id: string;
   userId: string;
   subject: string;
   questions: StoredMockTestQuestion[];
+  status: 'in_progress' | 'submitted' | 'abandoned';
+  currentQIndex?: number;
+  answers?: Record<string, string>;
+  timeRemainingSeconds?: number;
+  resultId?: string;
   createdAt: number;
+  updatedAt: number;
 }
 
-const TTL_MS = 2 * 60 * 60 * 1000; // 2 hours — long enough to finish a test
-const store = new Map<string, StoredMockTestSession>();
-
-function purgeExpired(): void {
-  const now = Date.now();
-  for (const [id, session] of store) {
-    if (now - session.createdAt > TTL_MS) store.delete(id);
-  }
-}
+const COLLECTION = 'mock_test_attempts';
 
 function newId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export const mockTestSessionStore = {
-  create(userId: string, subject: string, questions: GeneratedQuestion[]): StoredMockTestSession {
-    purgeExpired();
+  async create(userId: string, subject: string, questions: GeneratedQuestion[]): Promise<StoredMockTestSession> {
+    const db = await getDb();
     const session: StoredMockTestSession = {
       id: newId('test'),
       userId,
       subject,
       questions: questions.map((q) => ({ ...q, id: newId('q') })),
+      status: 'in_progress',
+      currentQIndex: 0,
+      answers: {},
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
-    store.set(session.id, session);
+    await db.collection<StoredMockTestSession>(COLLECTION).insertOne(session);
     return session;
   },
 
-  get(id: string, userId: string): StoredMockTestSession | undefined {
-    const session = store.get(id);
-    if (!session || session.userId !== userId) return undefined;
-    if (Date.now() - session.createdAt > TTL_MS) {
-      store.delete(id);
-      return undefined;
+  async get(id: string, userId: string): Promise<StoredMockTestSession | null> {
+    const db = await getDb();
+    return db.collection<StoredMockTestSession>(COLLECTION).findOne({ id, userId });
+  },
+
+  async getActiveAttempt(userId: string): Promise<StoredMockTestSession | null> {
+    const db = await getDb();
+    return db.collection<StoredMockTestSession>(COLLECTION).findOne(
+      { userId, status: 'in_progress' },
+      { sort: { updatedAt: -1 } }
+    );
+  },
+
+  async updateProgress(
+    id: string,
+    userId: string,
+    patch: {
+      answers?: Record<string, string>;
+      currentQIndex?: number;
+      timeRemainingSeconds?: number;
     }
-    return session;
+  ): Promise<boolean> {
+    const db = await getDb();
+    const res = await db.collection<StoredMockTestSession>(COLLECTION).updateOne(
+      { id, userId, status: 'in_progress' },
+      {
+        $set: {
+          ...patch,
+          updatedAt: Date.now(),
+        },
+      }
+    );
+    return res.matchedCount > 0;
+  },
+
+  async markSubmitted(id: string, userId: string, resultId: string): Promise<boolean> {
+    const db = await getDb();
+    const res = await db.collection<StoredMockTestSession>(COLLECTION).updateOne(
+      { id, userId },
+      {
+        $set: {
+          status: 'submitted',
+          resultId,
+          updatedAt: Date.now(),
+        },
+      }
+    );
+    return res.matchedCount > 0;
+  },
+
+  async abandon(id: string, userId: string): Promise<boolean> {
+    const db = await getDb();
+    const res = await db.collection<StoredMockTestSession>(COLLECTION).updateOne(
+      { id, userId, status: 'in_progress' },
+      {
+        $set: {
+          status: 'abandoned',
+          updatedAt: Date.now(),
+        },
+      }
+    );
+    return res.matchedCount > 0;
   },
 };
-
-export type { StoredMockTestSession };

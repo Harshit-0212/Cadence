@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/Badge';
 import { useToast } from '@/store/ToastContext';
 import { documentService } from '@/services/documentService';
 import { learningFeaturesService } from '@/services/learningFeaturesService';
+import { invalidateStats } from '@/store/StatsContext';
 
 interface DocumentItem {
   id: string;
@@ -76,6 +77,7 @@ export function DocumentLibrary() {
       };
       setDocs((prev) => [newDoc, ...prev]);
       showToast('Document analyzed & synthesized successfully.', 'success');
+      invalidateStats();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Upload failed.';
       showToast(msg, 'error');
@@ -99,25 +101,45 @@ export function DocumentLibrary() {
     }
   };
 
+  const [generatingCardsDocId, setGeneratingCardsDocId] = useState<string | null>(null);
+
   const handleMakeFlashcards = async (doc: DocumentItem) => {
+    if (generatingCardsDocId) return; // prevent duplicate clicks
+    setGeneratingCardsDocId(doc.id);
+
     try {
-      // Create flashcards from key points
-      if (doc.keyPoints && doc.keyPoints.length > 0) {
-        for (const pt of doc.keyPoints.slice(0, 3)) {
-          await learningFeaturesService.createFlashcard({
-            front: `What is the significance of: ${pt}?`,
-            back: `From document "${doc.name}": ${doc.summary.slice(0, 140)}...`,
-            subject: doc.subject,
-            topic: pt,
-            sourceDocId: doc.id,
-          });
-        }
-        showToast('Created flashcards and saved to your review queue.', 'success');
-      } else {
-        showToast('Generated summary flashcard in deck.', 'success');
+      // 1. Fetch existing cards to extract known questions
+      let existingQuestions: string[] = [];
+      try {
+        const allCards = await learningFeaturesService.getAllFlashcards();
+        existingQuestions = allCards
+          .filter((c: any) => c.sourceDocId === doc.id)
+          .map((c: any) => c.front);
+      } catch {
+        // Continue with empty list if query fails
       }
-    } catch {
-      showToast('Flashcards generated and scheduled.', 'success');
+
+      // 2. Generate flashcards with strict anti-duplication
+      const res = await learningFeaturesService.generateFlashcardsForDocument({
+        documentId: doc.id,
+        documentName: doc.name,
+        documentContent: `${doc.summary} Key highlights: ${doc.keyPoints.join(', ')}`,
+        existingQuestions,
+      });
+
+      const { created = 0, skipped = 0 } = res || {};
+      if (created > 0) {
+        showToast(`Created ${created} new flashcards (${skipped} duplicates skipped).`, 'success');
+      } else if (skipped > 0) {
+        showToast(`All ${skipped} generated cards already exist in your deck. No duplicates added.`, 'info');
+      } else {
+        showToast('Flashcard deck is already comprehensive for this document.', 'info');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Flashcard generation failed.';
+      showToast(msg, 'error');
+    } finally {
+      setGeneratingCardsDocId(null);
     }
   };
 
@@ -228,8 +250,21 @@ export function DocumentLibrary() {
                   <Button size="sm" variant="outline" onClick={() => handleGenerateTest(doc)}>
                     <CheckSquare size={13} /> Gen Test
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => handleMakeFlashcards(doc)}>
-                    <Sparkles size={13} /> Make Cards
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={generatingCardsDocId === doc.id}
+                    onClick={() => handleMakeFlashcards(doc)}
+                  >
+                    {generatingCardsDocId === doc.id ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" /> Making Cards...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={13} /> Make Cards
+                      </>
+                    )}
                   </Button>
                   <Button size="sm" variant="primary" onClick={() => handleAskTutor(doc)}>
                     <MessageSquare size={13} /> Ask Tutor

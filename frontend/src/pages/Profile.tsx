@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/Input';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuth } from '@/store/AuthContext';
 import { useAppData } from '@/store/AppDataContext';
+import { useStats } from '@/store/StatsContext';
 import { useToast } from '@/store/ToastContext';
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
@@ -18,6 +19,7 @@ const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 export function Profile() {
   const { user, uploadAvatar } = useAuth();
   const { goal, progress } = useAppData();
+  const { stats } = useStats();
   const { showToast } = useToast();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name ?? '');
@@ -111,7 +113,7 @@ export function Profile() {
                 })}
               />
               <InfoRow icon={Target} label="Current goal" value={goal?.title ?? 'Not set'} />
-              <InfoRow icon={Zap} label="Level" value={`${user?.level ?? 1} · ${user?.xp ?? 0} XP`} />
+              <InfoRow icon={Zap} label="Level" value={`Level ${stats?.level ?? 1} · ${stats?.xp ?? 0} XP`} />
             </div>
           </Card>
           </StaggerItem>
@@ -119,10 +121,15 @@ export function Profile() {
           {/* Stats + activity */}
           <StaggerItem className="lg:col-span-2"><div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StatBox icon={Flame} label="Streak" value={`${progress?.streakDays ?? 0} days`} color="warning" />
-              <StatBox icon={BookOpen} label="Topics" value={`${progress?.topicsMastered ?? 0}`} color="success" />
-              <StatBox icon={Zap} label="XP" value={`${user?.xp ?? 0}`} color="primary" />
-              <StatBox icon={Target} label="Overall" value={`${progress?.overallCompletion ?? 0}%`} color="accent" />
+              <StatBox icon={Flame} label="Streak" value={`${stats?.currentStreak ?? 0} days`} color="warning" />
+              <StatBox icon={BookOpen} label="Flashcards Mastered" value={`${stats?.flashcardsMastered ?? progress?.topicsMastered ?? 0}`} color="success" />
+              <StatBox icon={Zap} label="Total XP" value={`${stats?.xp ?? 0}`} color="primary" />
+              <StatBox
+                icon={Target}
+                label="Overall"
+                value={`${progress?.overallCompletion ?? (stats ? Math.min(100, Math.round(stats.testsTaken * 10 + stats.sessionsCompleted * 5)) : 0)}%`}
+                color="accent"
+              />
             </div>
 
             <Card>

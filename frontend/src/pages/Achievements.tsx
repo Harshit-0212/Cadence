@@ -1,4 +1,4 @@
-﻿import { motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Flame, Target, Brain, BookOpen, Zap, Trophy, Lock, Award } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/Badge';
 import { AnimatedNumber } from '@/components/ui/AnimatedNumber';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useAppData } from '@/store/AppDataContext';
+import { useStats } from '@/store/StatsContext';
 
 const ICONS: Record<string, typeof Flame> = {
   flame: Flame,
@@ -21,13 +22,15 @@ const XP_PER_LEVEL = 500;
 
 export function Achievements() {
   const { progress, achievements } = useAppData();
+  const { stats } = useStats();
 
   const unlocked = achievements.filter((a) => a.unlocked);
   const locked = achievements.filter((a) => !a.unlocked);
 
-  // XP is a derived gamification score from real activity — not a stored/fabricated value.
-  const xp = (progress?.topicsMastered ?? 0) * 100 + (progress?.streakDays ?? 0) * 20 + unlocked.length * 150;
-  const level = Math.floor(xp / XP_PER_LEVEL) + 1;
+  // Single Source of Truth for XP, Level, and Streak derived from backend stats
+  const xp = stats?.xp ?? 0;
+  const level = stats?.level ?? Math.floor(xp / XP_PER_LEVEL) + 1;
+  const streakDays = stats?.currentStreak ?? 0;
   const xpToNext = XP_PER_LEVEL - (xp % XP_PER_LEVEL);
 
   if (!progress) {
@@ -58,7 +61,7 @@ export function Achievements() {
             </div>
             <div>
               <p className="font-display text-2xl font-bold text-ink-900 dark:text-ink-50">
-                <AnimatedNumber value={progress.streakDays} suffix=" days" />
+                <AnimatedNumber value={streakDays} suffix=" days" />
               </p>
               <p className="text-sm text-ink-500">Current streak</p>
             </div>

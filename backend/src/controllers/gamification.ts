@@ -2,29 +2,72 @@ import type { Response } from 'express';
 import type { AuthedRequest } from '../middleware/auth.js';
 import { gamificationStore, type LearningActionType } from '../lib/gamificationStore.js';
 import { activityStore } from '../lib/activityStore.js';
-import { userStore } from '../lib/users.js';
+import { getDb } from '../lib/db.js';
+import { computeUserStatsSummary } from '../routes/stats.js';
 
 export const gamificationController = {
   async getLeaderboard(req: AuthedRequest, res: Response): Promise<void> {
     try {
-      const topProfiles = await gamificationStore.getLeaderboard(50);
-      const userIds = topProfiles.map((p) => p.userId);
-      
-      const enriched = await Promise.all(
-        topProfiles.map(async (p, idx) => {
-          const userDoc = await userStore.findById(p.userId);
+      const db = await getDb();
+      const users = await db.collection('users').find({}).toArray();
+
+      // Compute server XP & stats for each user (single source of truth)
+      const userProfiles = await Promise.all(
+        users.map(async (u) => {
+          const stats = await computeUserStatsSummary(u.id);
+          const doc = {
+            userId: u.id,
+            name: u.full_name || 'Anonymous Scholar',
+            avatar: u.avatar_image,
+            xp: stats.xp,
+            level: stats.level,
+            streak: stats.currentStreak,
+            updatedAt: new Date().toISOString(),
+          };
+
+          // Maintain user_stats collection
+          await db.collection('user_stats').updateOne(
+            { userId: u.id },
+            { $set: doc },
+            { upsert: true }
+          );
+
           return {
-            rank: idx + 1,
-            userId: p.userId,
-            name: userDoc?.full_name || 'Anonymous Scholar',
-            avatar: userDoc?.avatar_image,
-            xp: p.totalXp,
-            level: p.level,
-            streak: p.currentStreak,
-            isUser: p.userId === req.userId,
+            ...doc,
+            isUser: u.id === req.userId,
           };
         })
       );
+
+      // Rank purely by server XP (descending)
+      userProfiles.sort((a, b) => b.xp - a.xp || b.streak - a.streak || a.name.localeCompare(b.name));
+
+      const enriched = userProfiles.slice(0, 50).map((p, idx) => ({
+        rank: idx + 1,
+        userId: p.userId,
+        name: p.name,
+        avatar: p.avatar,
+        xp: p.xp,
+        level: p.level,
+        streak: p.streak,
+        isUser: p.isUser,
+      }));
+
+      // Ensure the requesting user's row is included even if outside top 50
+      const userIndex = userProfiles.findIndex((p) => p.isUser);
+      if (userIndex >= 50 && userIndex !== -1) {
+        const u = userProfiles[userIndex];
+        enriched.push({
+          rank: userIndex + 1,
+          userId: u.userId,
+          name: u.name,
+          avatar: u.avatar,
+          xp: u.xp,
+          level: u.level,
+          streak: u.streak,
+          isUser: true,
+        });
+      }
 
       res.json({ data: enriched });
     } catch (err: unknown) {

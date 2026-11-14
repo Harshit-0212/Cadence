@@ -372,7 +372,9 @@ export function StageDetail() {
     try {
       const p = await journeyService.getProgress(journeySlug!);
       setProgress(p);
-    } catch {}
+    } catch {
+      // Ignore background progress refresh failure
+    }
   };
 
   if (loading) {

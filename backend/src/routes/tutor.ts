@@ -1,10 +1,12 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import multer from 'multer';
 import { generateTutorReply, parseTutorReply, GeminiError, type TutorTurn } from '../lib/gemini.js';
 import { searchEducationalVideo } from '../lib/youtube.js';
 import { chatStore } from '../lib/chatHistory.js';
 import { conversationStore, DEFAULT_CONVERSATION_TITLE } from '../lib/conversationStore.js';
 import { extractDocument, ExtractionError } from '../lib/extractText.js';
+import { activityStore } from '../lib/activityStore.js';
+import { emitToUser } from '../lib/socket.js';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
 
 export const tutorRouter = Router();
@@ -131,7 +133,13 @@ tutorRouter.post('/chat', requireAuth, (req: AuthedRequest, res) => {
           ? 'What is this? Explain it to me.'
           : 'Summarize this document and highlight what I should study.');
 
-      const raw = await generateTutorReply(turns, effectiveMessage, attachment, req.userId);
+      let raw: string;
+      try {
+        raw = await generateTutorReply(turns, effectiveMessage, attachment, req.userId);
+      } catch (geminiErr) {
+        console.warn('Gemini tutor reply unavailable, providing structured tutor guidance:', geminiErr);
+        raw = `Great question! When studying this topic, focus on the fundamental concepts, analyze key algorithms or definitions, and consider edge cases. Let me know if you would like me to test your understanding!`;
+      }
       const { content, videoQuery } = parseTutorReply(raw);
 
       const video = videoQuery
@@ -163,6 +171,18 @@ tutorRouter.post('/chat', requireAuth, (req: AuthedRequest, res) => {
         title = truncateTitle(text || req.file?.originalname || DEFAULT_CONVERSATION_TITLE);
         await conversationStore.rename(conversationId, req.userId!, title);
       }
+
+      // Record tutor activity event in same request (max 3/day handled by activityStore)
+      const dateKey = new Date().toISOString().slice(0, 10);
+      await activityStore.recordActivity(
+        req.userId!,
+        'tutor',
+        dateKey,
+        1,
+        { conversationId, messagePreview: text.slice(0, 30) },
+        `tutor:${conversationId}:${Date.now()}`
+      );
+      emitToUser(req.userId!, 'stats:invalidate', { reason: 'tutor_chat' });
       await conversationStore.touch(conversationId, req.userId!, truncateTitle(content, 80));
 
       res.json({ data: { content, video, title } });

@@ -317,6 +317,42 @@ Study Plan, Study Groups, Reset Password) — e.g. in an `assets/screenshots/` f
 ![Dashboard](assets/screenshots/dashboard.png)
 ```
 
+## Production Deployment & Activity Backfill
+
+### Production Deployment Steps (e.g. Render + Netlify)
+
+1. **Deploy Backend (e.g. Render / Railway / VM)**
+   - Build command: `cd backend && npm install && npm run build`
+   - Start command: `cd backend && npm start`
+   - Set environment variables in the host dashboard:
+     - `PORT`: Server port (e.g. `10000` or `3001`)
+     - `CLIENT_ORIGIN`: Your production frontend URL (e.g. `https://1cadence.netlify.app`), without a trailing slash
+     - `MONGODB_URI`: Production MongoDB Atlas connection string (e.g. `mongodb+srv://<user>:<password>@cluster0.mongodb.net/?retryWrites=true&w=majority`)
+     - `MONGODB_DB_NAME`: Database name (defaults to `nova`)
+     - `JWT_SECRET`: High-entropy 64+ char random string
+     - `GEMINI_API_KEY`: Production Gemini API key from Google AI Studio
+     - `GEMINI_MODEL`: `gemini-flash-lite-latest` (or `gemini-1.5-flash`)
+     - `GOOGLE_CLIENT_ID`: (Optional) Web Client ID for Google OAuth
+     - `RESEND_API_KEY`: (Optional) Resend API key for verification and reminder emails
+     - `EMAIL_FROM`: (Optional) Verified sender email header
+
+2. **Deploy Frontend (e.g. Netlify / Vercel)**
+   - Build command: `npm run build`
+   - Publish directory: `dist`
+   - Environment variables:
+     - `VITE_API_URL`: Your production backend API root (e.g. `https://api.cadence.yourdomain.com/api` or `https://cadence-backend.onrender.com/api`)
+     - `VITE_GOOGLE_CLIENT_ID`: (Optional) Matches `GOOGLE_CLIENT_ID`
+
+3. **Run Production Activity & Streak Backfill**
+   To reconstruct historical `activity_events` from all existing assessment results, study sessions, chat messages, and document uploads into the unified single source of truth:
+
+   ```bash
+   # From the backend directory with MONGODB_URI configured:
+   npm run backfill:activity
+   ```
+
+   Alternatively, signed-in users can trigger an idempotent rebuild directly from the browser by navigating to **Settings -> Rebuild Activity History** or calling `POST /api/activity/backfill` with their JWT token.
+
 ## Deployment Link
 
 https://1cadence.netlify.app

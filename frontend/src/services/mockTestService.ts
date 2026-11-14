@@ -42,4 +42,54 @@ export const mockTestService = {
     const data = (await fetchApi('/mocktest/results')) as { results: MockTestResult[] };
     return data.results;
   },
+
+  async getActiveAttempt(): Promise<{
+    testId: string;
+    subject: string;
+    questions: Question[];
+    answers: Record<string, string>;
+    currentQuestionIndex: number;
+    timeSpentSeconds: number;
+    timerEndsAt?: number;
+    timeLimitSeconds?: number;
+    status: string;
+  } | null> {
+    const res = (await fetchApi('/mocktest/active')) as { attempt: any };
+    return res.attempt || null;
+  },
+
+  async updateProgress(
+    testId: string,
+    answers: Record<string, string>,
+    currentQuestionIndex?: number,
+    timeSpentSeconds?: number
+  ): Promise<boolean> {
+    try {
+      await fetchApi(`/mocktest/progress/${testId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ answers, currentQuestionIndex, timeSpentSeconds }),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async abandonTest(testId: string): Promise<boolean> {
+    try {
+      await fetchApi(`/mocktest/abandon/${testId}`, { method: 'POST' });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async getResultById(id: string): Promise<MockTestResult | null> {
+    try {
+      const res = (await fetchApi(`/mocktest/results/${id}`)) as { result: MockTestResult };
+      return res.result || null;
+    } catch {
+      return null;
+    }
+  },
 };

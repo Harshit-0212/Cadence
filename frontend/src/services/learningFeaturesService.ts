@@ -89,10 +89,26 @@ export const learningFeaturesService = {
     })) as any;
     return res.data;
   },
-  async reviewFlashcard(id: string, rating: number): Promise<void> {
+  async getAllFlashcards(): Promise<any[]> {
+    const res = (await fetchApi('/flashcards/all')) as any;
+    return res.data || [];
+  },
+  async generateFlashcardsForDocument(payload: {
+    documentId: string;
+    documentName: string;
+    documentContent?: string;
+    existingQuestions?: string[];
+  }): Promise<{ cards: any[]; created: number; skipped: number }> {
+    const res = (await fetchApi('/flashcards/generate-for-document', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })) as any;
+    return res.data;
+  },
+  async reviewFlashcard(id: string, rating: number, reviewType?: 'flip' | 'mcq' | 'cloze' | 'type'): Promise<void> {
     await fetchApi(`/flashcards/${id}/review`, {
       method: 'POST',
-      body: JSON.stringify({ rating }),
+      body: JSON.stringify({ rating, reviewType }),
     });
   },
 

@@ -1,4 +1,4 @@
-﻿import { Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Play, Clock, Sparkles, BookOpen, ArrowRight } from 'lucide-react';
 import type { StudySession, StudyPlan } from '@/types';
@@ -15,11 +15,11 @@ export function ContinueLearningCard({ plan, todaySession }: ContinueLearningCar
     subject: todaySession?.subject || 'Computer Science',
     estimatedMinutes: todaySession?.estimatedMinutes || 45,
     difficulty: todaySession?.difficulty || 'medium',
-    done: todaySession?.conceptsDone ?? (plan?.completionPercent ? Math.round((plan.completionPercent / 100) * 10) : 0),
-    total: todaySession?.conceptsTotal ?? 10,
+    done: todaySession?.conceptsDone ?? 0,
+    total: todaySession?.conceptsTotal ?? 0,
     completionPercent: todaySession && todaySession.conceptsTotal > 0
       ? Math.round((todaySession.conceptsDone / todaySession.conceptsTotal) * 100)
-      : plan?.completionPercent ?? 0,
+      : (plan?.completionPercent ?? 0),
   };
 
   return (
@@ -76,7 +76,11 @@ export function ContinueLearningCard({ plan, todaySession }: ContinueLearningCar
               <span className="flex items-center gap-1">
                 <Clock size={12} /> {defaultCourse.estimatedMinutes} min estimated session
               </span>
-              <span>{defaultCourse.done} of {defaultCourse.total} concepts completed</span>
+              <span>
+                {defaultCourse.total > 0
+                  ? `${defaultCourse.done} of ${defaultCourse.total} concepts completed`
+                  : `${defaultCourse.done} concepts completed`}
+              </span>
             </div>
           </div>
         </div>

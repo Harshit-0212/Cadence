@@ -1,4 +1,5 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ClipboardList,
@@ -20,13 +21,15 @@ import {
   Target,
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { Reveal } from '@/components/ui/Reveal';
+import { PageContainer } from '@/components/layout/PageContainer';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { useAppData } from '@/store/AppDataContext';
 import { useToast } from '@/store/ToastContext';
+import { mockTestStore } from '@/store/MockTestStore';
+import { mockTestService } from '@/services/mockTestService';
 import type { DocumentAnalysisResponse, MockTest, MockTestResult, Question } from '@/types';
 
 const ACCEPTED_DOCUMENT_TYPES = [
@@ -57,6 +60,8 @@ function formatClock(totalSeconds: number): string {
 }
 
 export function Assessments() {
+  const { attemptId } = useParams<{ attemptId?: string }>();
+  const navigate = useNavigate();
   const {
     goal,
     weakTopics,
@@ -85,11 +90,82 @@ export function Assessments() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<MockTestResult | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [inProgressBanner, setInProgressBanner] = useState<{
+    test: MockTest;
+    answers: Record<string, string>;
+    currentQ: number;
+    secondsLeft: number;
+    subject: string;
+  } | null>(null);
 
   const answersRef = useRef(answers);
   answersRef.current = answers;
   const startedAtRef = useRef<number>(0);
   const submitLockRef = useRef(false);
+
+  // Load result from URL if attemptId is present
+  useEffect(() => {
+    if (attemptId) {
+      mockTestService.getResultById(attemptId).then((r) => {
+        if (r) {
+          setResult(r);
+          setPhase('result');
+        }
+      });
+    }
+  }, [attemptId]);
+
+  // Check for in-progress tests on mount
+  useEffect(() => {
+    if (attemptId) return;
+
+    // 1. Check local storage
+    const localAttempt = mockTestStore.getActiveTest();
+    if (localAttempt && localAttempt.timerEndsAt > Date.now()) {
+      const remainingSecs = Math.max(1, Math.round((localAttempt.timerEndsAt - Date.now()) / 1000));
+      setTest(localAttempt.test);
+      setAnswers(localAttempt.answers || {});
+      setCurrentQ(localAttempt.currentQ || 0);
+      setSecondsLeft(remainingSecs);
+      startedAtRef.current = localAttempt.startedAt || Date.now();
+      setPhase('taking');
+      return;
+    } else if (localAttempt) {
+      mockTestStore.clearActiveTest();
+    }
+
+    // 2. Check server for active attempt
+    mockTestService.getActiveAttempt().then((serverAttempt) => {
+      if (serverAttempt && serverAttempt.status === 'in_progress' && serverAttempt.questions?.length) {
+        const timeLimit = serverAttempt.timeLimitSeconds || serverAttempt.questions.length * 90;
+        const remaining = serverAttempt.timerEndsAt
+          ? Math.max(0, Math.round((serverAttempt.timerEndsAt - Date.now()) / 1000))
+          : timeLimit;
+
+        if (remaining > 0) {
+          const mockT: MockTest = {
+            id: serverAttempt.testId,
+            config: {
+              subject: serverAttempt.subject,
+              topics: [],
+              difficulty: 'mixed',
+              numQuestions: serverAttempt.questions.length,
+            },
+            questions: serverAttempt.questions,
+            createdAt: new Date().toISOString(),
+            timeLimitSeconds: timeLimit,
+          };
+          setInProgressBanner({
+            test: mockT,
+            answers: serverAttempt.answers || {},
+            currentQ: serverAttempt.currentQuestionIndex || 0,
+            secondsLeft: remaining,
+            subject: serverAttempt.subject,
+          });
+        }
+      }
+    }).catch(() => {});
+  }, [attemptId]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'analyzing' | 'analyzed' | 'error'>('idle');
@@ -190,8 +266,65 @@ export function Assessments() {
     setAnswers({});
     setCurrentQ(0);
     setSecondsLeft(t.timeLimitSeconds);
-    startedAtRef.current = Date.now();
+    const now = Date.now();
+    startedAtRef.current = now;
+    const timerEndsAt = now + t.timeLimitSeconds * 1000;
+    mockTestStore.saveActiveTest({
+      test: t,
+      answers: {},
+      currentQ: 0,
+      timerEndsAt,
+      startedAt: now,
+      subject: t.config.subject,
+    });
+    setInProgressBanner(null);
     setPhase('taking');
+  };
+
+  const resumeTest = (bannerData: typeof inProgressBanner) => {
+    if (!bannerData) return;
+    submitLockRef.current = false;
+    setTest(bannerData.test);
+    setAnswers(bannerData.answers);
+    setCurrentQ(bannerData.currentQ);
+    setSecondsLeft(bannerData.secondsLeft);
+    const now = Date.now();
+    startedAtRef.current = now;
+    const timerEndsAt = now + bannerData.secondsLeft * 1000;
+    mockTestStore.saveActiveTest({
+      test: bannerData.test,
+      answers: bannerData.answers,
+      currentQ: bannerData.currentQ,
+      timerEndsAt,
+      startedAt: now,
+      subject: bannerData.subject,
+    });
+    setInProgressBanner(null);
+    setPhase('taking');
+  };
+
+  const handleAnswerChange = useCallback(
+    (newAnswers: Record<string, string>, newQIndex?: number) => {
+      setAnswers(newAnswers);
+      const qIndex = typeof newQIndex === 'number' ? newQIndex : currentQ;
+      mockTestStore.updateAnswers(newAnswers, qIndex);
+      if (test) {
+        const timeSpent = Math.round((Date.now() - startedAtRef.current) / 1000);
+        mockTestService.updateProgress(test.id, newAnswers, qIndex, timeSpent).catch(() => {});
+      }
+    },
+    [currentQ, test]
+  );
+
+  const handleAbandon = async () => {
+    if (!test) return;
+    if (window.confirm('Are you sure you want to abandon this test? In-progress answers will be lost.')) {
+      mockTestStore.clearActiveTest();
+      setInProgressBanner(null);
+      await mockTestService.abandonTest(test.id);
+      reset();
+      showToast('Mock test abandoned.', 'info');
+    }
   };
 
   const handleGenerateFromDocument = async () => {
@@ -217,8 +350,18 @@ export function Assessments() {
     try {
       const timeSpentSeconds = Math.round((Date.now() - startedAtRef.current) / 1000);
       const r = await submitMockTest(test, answersRef.current, timeSpentSeconds);
+      mockTestStore.clearActiveTest();
+      mockTestStore.saveLastResult(r);
       setResult(r);
       setPhase('result');
+      const targetId =
+        r.testId ||
+        (r as unknown as Record<string, string>).attemptId ||
+        (r as unknown as Record<string, string>)._id ||
+        (r as unknown as Record<string, string>).id;
+      if (targetId) {
+        navigate(`/app/assessments/results/${targetId}`, { replace: true });
+      }
     } catch (err) {
       submitLockRef.current = false;
       showToast(err instanceof Error ? err.message : 'Submission failed.', 'error');
@@ -248,11 +391,12 @@ export function Assessments() {
     setResult(null);
     setAnswers({});
     setPhase('config');
+    navigate('/app/assessments', { replace: true });
   };
 
   return (
     <AppLayout>
-      <div className="p-4 sm:p-6 lg:p-8">
+      <PageContainer maxWidth="7xl">
         <PageHeader
           title="Assessments"
           subtitle="Generate mock tests and find your weak spots."
@@ -266,6 +410,38 @@ export function Assessments() {
         <AnimatePresence mode="wait">
           {phase === 'config' && (
             <motion.div key="config" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              {inProgressBanner && (
+                <div className="mb-6 max-w-2xl rounded-2xl border border-primary-500/30 bg-primary-500/10 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge tone="accent">Test In Progress</Badge>
+                      <span className="text-sm font-semibold text-ink-900 dark:text-ink-100">{inProgressBanner.subject}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-ink-500">
+                      {Object.keys(inProgressBanner.answers).length}/{inProgressBanner.test.questions.length} answered · {formatClock(inProgressBanner.secondsLeft)} remaining
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" onClick={() => resumeTest(inProgressBanner)}>
+                      <Play size={14} /> Resume Test
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={async () => {
+                        if (window.confirm('Abandon in-progress test?')) {
+                          mockTestStore.clearActiveTest();
+                          await mockTestService.abandonTest(inProgressBanner.test.id);
+                          setInProgressBanner(null);
+                        }
+                      }}
+                    >
+                      Abandon
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <Card padding="lg" className="max-w-2xl">
                 <h3 className="mb-5 font-display text-lg font-semibold text-ink-900 dark:text-ink-50">
                   Configure your mock test
@@ -484,23 +660,27 @@ export function Assessments() {
               <TakingView
                 test={test}
                 currentQ={currentQ}
-                setCurrentQ={setCurrentQ}
+                setCurrentQ={(n) => {
+                  setCurrentQ(n);
+                  handleAnswerChange(answers, n);
+                }}
                 answers={answers}
-                setAnswers={setAnswers}
+                onAnswerChange={handleAnswerChange}
                 onSubmit={handleSubmit}
+                onAbandon={handleAbandon}
                 submitting={submitting}
                 secondsLeft={secondsLeft}
               />
             </motion.div>
           )}
 
-          {phase === 'result' && result && test && (
+          {phase === 'result' && result && (
             <motion.div key="result" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <ResultView result={result} test={test} onReset={reset} />
+              <ResultView result={result} test={test || undefined} onReset={reset} />
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </PageContainer>
     </AppLayout>
   );
 }
@@ -510,8 +690,9 @@ function TakingView({
   currentQ,
   setCurrentQ,
   answers,
-  setAnswers,
+  onAnswerChange,
   onSubmit,
+  onAbandon,
   submitting,
   secondsLeft,
 }: {
@@ -519,8 +700,9 @@ function TakingView({
   currentQ: number;
   setCurrentQ: (n: number) => void;
   answers: Record<string, string>;
-  setAnswers: (a: Record<string, string>) => void;
+  onAnswerChange: (a: Record<string, string>, currentQ?: number) => void;
   onSubmit: () => void;
+  onAbandon: () => void;
   submitting: boolean;
   secondsLeft: number;
 }) {
@@ -530,7 +712,10 @@ function TakingView({
   const selected = answers[q.id];
   const timeCritical = secondsLeft <= 60;
 
-  const pick = (value: string) => setAnswers({ ...answers, [q.id]: value });
+  const pick = (value: string) => {
+    const nextAnswers = { ...answers, [q.id]: value };
+    onAnswerChange(nextAnswers, currentQ);
+  };
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -609,12 +794,23 @@ function TakingView({
             </Button>
           )}
         </div>
+
+        <div className="mt-5 pt-3 border-t border-ink-100 dark:border-ink-800 flex items-center justify-between text-xs text-ink-400">
+          <span>Answers auto-saved to cloud & device</span>
+          <button
+            type="button"
+            onClick={onAbandon}
+            className="text-ink-400 hover:text-error-500 hover:underline transition"
+          >
+            Abandon test
+          </button>
+        </div>
       </Card>
     </div>
   );
 }
 
-function ResultView({ result, test, onReset }: { result: MockTestResult; test: MockTest; onReset: () => void }) {
+function ResultView({ result, test, onReset }: { result: MockTestResult; test?: MockTest; onReset: () => void }) {
   const passed = result.scorePercent >= 60;
   return (
     <div className="mx-auto max-w-2xl">
@@ -667,14 +863,16 @@ function ResultView({ result, test, onReset }: { result: MockTestResult; test: M
           </div>
         )}
 
-        <div className="mt-5 space-y-2">
-          <h3 className="font-display text-sm font-semibold text-ink-900 dark:text-ink-50">Review answers</h3>
-          {test.questions.map((q, i) => {
-            const userAns = result.perQuestion.find((p) => p.questionId === q.id);
-            const correct = userAns?.correct ?? false;
-            return <ReviewRow key={q.id} q={q} index={i} correct={correct} />;
-          })}
-        </div>
+        {test?.questions && test.questions.length > 0 && (
+          <div className="mt-5 space-y-2">
+            <h3 className="font-display text-sm font-semibold text-ink-900 dark:text-ink-50">Review answers</h3>
+            {test.questions.map((q, i) => {
+              const userAns = result.perQuestion.find((p) => p.questionId === q.id);
+              const correct = userAns?.correct ?? false;
+              return <ReviewRow key={q.id} q={q} index={i} correct={correct} />;
+            })}
+          </div>
+        )}
 
         <Button className="mt-6" fullWidth size="lg" onClick={onReset}>
           <RotateCcw size={16} /> Take Another Test

@@ -2,6 +2,7 @@ import { getDb } from './db.js';
 
 export interface StoredAssessmentResult {
   id: string;
+  testId?: string;
   userId: string;
   kind: 'mock-test' | 'session-check' | 'diagnostic';
   subject: string;

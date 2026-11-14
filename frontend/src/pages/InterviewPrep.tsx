@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { useToast } from '@/store/ToastContext';
 import { learningFeaturesService } from '@/services/learningFeaturesService';
+import { invalidateStats } from '@/store/StatsContext';
 
 export function InterviewPrep() {
   const { showToast } = useToast();
@@ -177,30 +178,15 @@ export function InterviewPrep() {
           questions: updatedAnswers,
         });
         setCompletedReport(report);
-      } catch {
-        setCompletedReport({
-          overallScore: 84,
-          communicationScore: 88,
-          technicalDepthScore: 82,
-          confidenceScore: 85,
-          strengths: [
-            'Clear explanation of thread pool offloading in libuv',
-            'Solid grasp of transaction isolation levels and concurrency control',
-            'Well structured architecture thought process',
-          ],
-          weaknesses: [
-            {
-              area: 'Distributed Rate Limiting',
-              reason: 'Did not specify Redis sliding window or Token Bucket algorithm trade-offs.',
-              fix: 'Reference Redis sorted sets (ZADD) or Leaky Bucket counter synchronization across replicas.',
-              studyRecommendation: 'Practice System Design: Rate Limiting & Concurrency module.',
-            },
-          ],
-        });
+        showToast('Interview completed! Detailed AI feedback generated.', 'success');
+        invalidateStats();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Evaluation failed';
+        showToast(`Evaluation error: ${msg}. Please try again.`, 'error');
+        setCompletedReport(null);
       } finally {
         setIsEvaluating(false);
       }
-      showToast('Interview completed! Detailed AI feedback generated. +50 XP', 'success');
     }
   };
 
@@ -223,26 +209,15 @@ export function InterviewPrep() {
         questions: finalAnswers,
       });
       setCompletedReport(report);
-    } catch {
-      setCompletedReport({
-        overallScore: 78,
-        communicationScore: 80,
-        technicalDepthScore: 75,
-        confidenceScore: 79,
-        strengths: ['Addressed initial technical points with clarity'],
-        weaknesses: [
-          {
-            area: 'Interview Completion',
-            reason: 'Session ended before all assessment rounds concluded.',
-            fix: 'Complete remaining questions to demonstrate depth in distributed systems.',
-            studyRecommendation: 'Practice remaining core technical topics in My Learning.',
-          },
-        ],
-      });
+      showToast('Early report generated from submitted answers.', 'info');
+      invalidateStats();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Evaluation failed';
+      showToast(`Evaluation error: ${msg}. Please try again.`, 'error');
+      setCompletedReport(null);
     } finally {
       setIsEvaluating(false);
     }
-    showToast('Early report generated from submitted answers.', 'info');
   };
 
   return (

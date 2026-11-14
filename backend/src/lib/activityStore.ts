@@ -8,6 +8,7 @@ export type ActivityEventType =
   | 'mistake_retry'
   | 'tutor'
   | 'focus'
+  | 'focus_minutes'
   | 'document'
   | 'app_open'
   | 'coding_submission';
@@ -196,7 +197,11 @@ export const activityStore = {
 
     const query: Record<string, unknown> = { userId };
     if (typeFilter && typeFilter !== 'all') {
-      query.type = typeFilter;
+      if (typeFilter === 'focus' || typeFilter === 'focus_minutes') {
+        query.type = { $in: ['focus', 'focus_minutes'] };
+      } else {
+        query.type = typeFilter;
+      }
     }
     if (year) {
       const yearRegex = new RegExp(`^${year}`);

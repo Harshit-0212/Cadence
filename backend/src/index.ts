@@ -23,6 +23,7 @@ import { userApiKeyRouter } from './routes/userApiKey.js';
 import { gamificationRouter } from './routes/gamification.js';
 import { featuresRouter } from './routes/features.js';
 import { activityRouter } from './routes/activity.js';
+import { statsRouter } from './routes/stats.js';
 import { activityStore } from './lib/activityStore.js';
 import { getDb } from './lib/db.js';
 import { initSocket } from './lib/socket.js';
@@ -94,6 +95,7 @@ app.use('/api/admin/journey', adminJourneyRouter);
 app.use('/api/user/api-keys', userApiKeyRouter);
 app.use('/api/gamification', gamificationRouter);
 app.use('/api/activity', activityRouter);
+app.use('/api/stats', statsRouter);
 app.use('/api', featuresRouter);
 
 app.use((req, res) => {

@@ -29,6 +29,13 @@ export interface FlashcardRecord {
   topic: string;
   sourceDocId?: string;
   sourceMistakeId?: string;
+  contentHash?: string;
+  stage?: 'new' | 'learning' | 'review' | 'mastered';
+  leech?: boolean;
+  leechCount?: number;
+  distractors?: string[];
+  clozeText?: string;
+  lastReviewType?: 'flip' | 'mcq' | 'cloze' | 'type';
   repetition: number; // consecutive correct reviews
   interval: number; // days until next review
   easeFactor: number; // default 2.5
@@ -107,19 +114,34 @@ export const learningStore = {
     return res.matchedCount > 0;
   },
 
-  // Flashcards (SM-2 Algorithm)
-  async createFlashcard(data: Omit<FlashcardRecord, 'id' | 'repetition' | 'interval' | 'easeFactor' | 'nextReviewDate' | 'createdAt'>): Promise<FlashcardRecord> {
+  // Flashcards (SM-2 Algorithm with Stages & Deduplication)
+  async createFlashcard(data: Omit<FlashcardRecord, 'id' | 'repetition' | 'interval' | 'easeFactor' | 'nextReviewDate' | 'createdAt'> & { contentHash?: string }): Promise<FlashcardRecord> {
     const db = await getDb();
+    const col = db.collection<FlashcardRecord>('flashcards');
+
+    // Ensure unique compound index on userId, sourceDocId, contentHash
+    try {
+      await col.createIndex(
+        { userId: 1, sourceDocId: 1, contentHash: 1 },
+        { unique: true, sparse: true }
+      );
+    } catch {
+      // Index might already exist
+    }
+
     const item: FlashcardRecord = {
       ...data,
       id: randomId(),
+      stage: data.stage || 'new',
+      leech: false,
+      leechCount: 0,
       repetition: 0,
       interval: 1,
       easeFactor: 2.5,
       nextReviewDate: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
-    await db.collection<FlashcardRecord>('flashcards').insertOne(item);
+    await col.insertOne(item);
     return item;
   },
 
@@ -131,22 +153,55 @@ export const learningStore = {
       .toArray();
   },
 
-  async reviewFlashcard(userId: string, id: string, rating: 1 | 2 | 3 | 4): Promise<FlashcardRecord | null> {
+  async getAllFlashcards(userId: string): Promise<FlashcardRecord[]> {
+    const db = await getDb();
+    return db.collection<FlashcardRecord>('flashcards')
+      .find({ userId })
+      .sort({ createdAt: -1 })
+      .toArray();
+  },
+
+  async reviewFlashcard(userId: string, id: string, rating: 1 | 2 | 3 | 4, reviewType?: 'flip' | 'mcq' | 'cloze' | 'type'): Promise<FlashcardRecord | null> {
     const db = await getDb();
     const card = await db.collection<FlashcardRecord>('flashcards').findOne({ id, userId });
     if (!card) return null;
 
     // SM-2 calculation: rating 1=Again, 2=Hard, 3=Good, 4=Easy
     let { repetition, interval, easeFactor } = card;
+    let leechCount = card.leechCount || 0;
+    let leech = card.leech || false;
+
     if (rating < 3) {
       repetition = 0;
       interval = 1;
+      leechCount += 1;
+      if (leechCount >= 4) {
+        leech = true;
+      }
     } else {
       if (repetition === 0) interval = 1;
       else if (repetition === 1) interval = 6;
       else interval = Math.round(interval * easeFactor);
       repetition += 1;
     }
+
+    // Determine Stage based on repetition and interval
+    let stage: FlashcardRecord['stage'] = 'learning';
+    if (repetition === 0) {
+      stage = 'learning';
+    } else if (interval < 7) {
+      stage = 'learning';
+    } else if (interval >= 7 && interval < 21) {
+      stage = 'review';
+    } else {
+      stage = 'mastered';
+    }
+
+    // Next review type in rotation (flip -> mcq -> cloze -> type -> flip)
+    const reviewModes: Array<'flip' | 'mcq' | 'cloze' | 'type'> = ['flip', 'mcq', 'cloze', 'type'];
+    const currentMode = reviewType || card.lastReviewType || 'flip';
+    const nextIdx = (reviewModes.indexOf(currentMode) + 1) % reviewModes.length;
+    const nextReviewType = reviewModes[nextIdx];
 
     // Ease Factor adjustment
     easeFactor = Math.max(1.3, easeFactor + (0.1 - (4 - rating) * (0.08 + (4 - rating) * 0.02)));
@@ -157,7 +212,18 @@ export const learningStore = {
 
     await db.collection<FlashcardRecord>('flashcards').updateOne(
       { id, userId },
-      { $set: { repetition, interval, easeFactor, nextReviewDate } }
+      {
+        $set: {
+          repetition,
+          interval,
+          easeFactor,
+          nextReviewDate,
+          stage,
+          leech,
+          leechCount,
+          lastReviewType: nextReviewType,
+        },
+      }
     );
 
     // Record review log
@@ -166,10 +232,21 @@ export const learningStore = {
       userId,
       cardId: id,
       rating,
+      reviewType: currentMode,
       reviewedAt: new Date().toISOString(),
     });
 
-    return { ...card, repetition, interval, easeFactor, nextReviewDate };
+    return {
+      ...card,
+      repetition,
+      interval,
+      easeFactor,
+      nextReviewDate,
+      stage,
+      leech,
+      leechCount,
+      lastReviewType: nextReviewType,
+    };
   },
 
   // Calendar events

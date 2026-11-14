@@ -181,8 +181,87 @@ export function ResumeMaker() {
       } else {
         await resumeService.update(resumeId, activeResume);
       }
-      await resumeService.downloadPdf(resumeId, `${activeResume.title || 'Resume'}.pdf`);
-      showToast('ATS-friendly PDF downloaded.', 'success');
+
+      // Check if resume-a4-canvas exists in the DOM to render exact WYSIWYG PDF
+      const canvasEl = document.getElementById('resume-a4-canvas');
+      if (canvasEl) {
+        // Create an isolated printing iframe
+        const printIframe = document.createElement('iframe');
+        printIframe.style.position = 'fixed';
+        printIframe.style.right = '0';
+        printIframe.style.bottom = '0';
+        printIframe.style.width = '0';
+        printIframe.style.height = '0';
+        printIframe.style.border = '0';
+        document.body.appendChild(printIframe);
+
+        const frameDoc = printIframe.contentWindow?.document;
+        if (frameDoc) {
+          // Copy all stylesheets and Tailwind links
+          const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+            .map((el) => el.outerHTML)
+            .join('\n');
+
+          frameDoc.open();
+          frameDoc.write(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>${activeResume.title || 'Resume'}</title>
+                ${styles}
+                <style>
+                  @page {
+                    size: A4;
+                    margin: 0;
+                  }
+                  html, body {
+                    margin: 0;
+                    padding: 0;
+                    background: white !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                  }
+                  #resume-a4-canvas {
+                    width: 210mm !important;
+                    min-height: 297mm !important;
+                    margin: 0 auto !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                    border-radius: 0 !important;
+                    padding: 24px !important;
+                  }
+                </style>
+              </head>
+              <body>
+                ${canvasEl.outerHTML}
+              </body>
+            </html>
+          `);
+          frameDoc.close();
+
+          // Wait for fonts and images to load before printing
+          setTimeout(() => {
+            try {
+              printIframe.contentWindow?.focus();
+              printIframe.contentWindow?.print();
+              showToast('Print dialog opened for exact A4 PDF export.', 'success');
+            } catch {
+              // Fallback to backend PDFKit if print dialog fails
+              resumeService.downloadPdf(resumeId, `${activeResume.title || 'Resume'}.pdf`);
+            } finally {
+              setTimeout(() => {
+                document.body.removeChild(printIframe);
+              }, 2000);
+            }
+          }, 600);
+        } else {
+          await resumeService.downloadPdf(resumeId, `${activeResume.title || 'Resume'}.pdf`);
+          showToast('ATS-friendly PDF downloaded.', 'success');
+        }
+      } else {
+        await resumeService.downloadPdf(resumeId, `${activeResume.title || 'Resume'}.pdf`);
+        showToast('ATS-friendly PDF downloaded.', 'success');
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'PDF export failed.';
       showToast(msg, 'error');

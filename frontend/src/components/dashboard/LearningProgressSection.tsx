@@ -10,6 +10,7 @@ import {
 import { Clock, CheckCircle2, Target, TrendingUp } from 'lucide-react';
 import { Reveal } from '@/components/ui/Reveal';
 import type { ProgressSnapshot } from '@/types';
+import { useStats } from '@/store/StatsContext';
 
 interface LearningProgressSectionProps {
   progress: ProgressSnapshot | null;
@@ -25,10 +26,11 @@ const metricVariants = {
 };
 
 export function LearningProgressSection({ progress }: LearningProgressSectionProps) {
-  const hours = progress?.hoursStudied ?? 18.5;
-  const streak = progress?.streakDays ?? 5;
-  const topicsMastered = progress?.topicsMastered ?? 12;
-  const completion = progress?.overallCompletion ?? 78;
+  const { stats } = useStats();
+  const hours = stats ? parseFloat((stats.studyMinutes / 60).toFixed(1)) : (progress?.hoursStudied ?? 0);
+  const streak = stats?.currentStreak ?? progress?.streakDays ?? 0;
+  const topicsMastered = stats?.flashcardsMastered ?? progress?.topicsMastered ?? 0;
+  const completion = progress?.overallCompletion ?? 0;
 
   const rawChartData = progress?.weeklyActivity?.length
     ? progress.weeklyActivity

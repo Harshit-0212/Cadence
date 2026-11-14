@@ -8,8 +8,10 @@ import {
 import { goalStore } from '../lib/goals.js';
 import { planStore, sessionStore, type StoredStudySession } from '../lib/studyPlans.js';
 import { assessmentStore } from '../lib/assessments.js';
+import { activityStore } from '../lib/activityStore.js';
 import { computeProgressForUser } from '../lib/progressCompute.js';
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js';
+import { emitToUser } from '../lib/socket.js';
 
 export const studyPlanRouter = Router();
 
@@ -134,6 +136,30 @@ studyPlanRouter.post('/sessions/:id/complete', requireAuth, async (req: AuthedRe
   });
   const allSessions = await sessionStore.listByPlan(session.planId);
   const plan = await planStore.update(session.planId, { completionPercent: recomputeCompletion(allSessions) });
+
+  // ATOMIC WRITE: Record activity event in the same completion handler
+  const { timezone, localDate } = req.body ?? {};
+  let dateKey = typeof localDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(localDate) ? localDate : '';
+  if (!dateKey) {
+    try {
+      const tz = typeof timezone === 'string' && timezone ? timezone : 'UTC';
+      dateKey = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+    } catch {
+      dateKey = new Date().toISOString().slice(0, 10);
+    }
+  }
+
+  await activityStore.recordActivity(
+    req.userId!,
+    'session',
+    dateKey,
+    3,
+    { title: `Completed Session: ${session.topic}`, sessionId: session.id, planId: session.planId },
+    `session:${session.id}`
+  );
+
+  emitToUser(req.userId!, 'stats:invalidate', { reason: 'session_completed', sessionId: session.id });
+
   res.json({ data: { session: updated, plan } });
 });
 
