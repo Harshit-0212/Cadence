@@ -1,4 +1,4 @@
-﻿/**
+/**
  * StageDetail.tsx — The per-stage learning workspace.
  *
  * Shows the list of activities in a stage, allows the student to:

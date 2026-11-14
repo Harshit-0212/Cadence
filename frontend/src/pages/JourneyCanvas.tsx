@@ -1,4 +1,4 @@
-﻿/**
+/**
  * JourneyCanvas.tsx — React Flow powered learning roadmap canvas with custom toolbar controls.
  *
  * Implements:
