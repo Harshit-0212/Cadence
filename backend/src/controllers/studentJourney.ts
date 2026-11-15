@@ -5,6 +5,8 @@
  * ALL progression state is computed server-side. Client cannot forge unlocks.
  */
 import type { Response } from 'express';
+import { GridFSBucket, ObjectId } from 'mongodb';
+import { getDb } from '../lib/db.js';
 import type { AuthedRequest } from '../middleware/auth.js';
 import {
   journeyStore,
@@ -13,6 +15,8 @@ import {
   knowledgeQuestionStore,
   checkpointAttemptStore,
   studentProgressStore,
+  journeyEdgeStore,
+  journeySettingsStore,
   recomputeStageStates,
   newAttemptId,
 } from '../lib/journeyStore.js';
@@ -56,15 +60,23 @@ function toPublicStage(s: Awaited<ReturnType<typeof stageStore.findById>>): Publ
     slug: s.slug,
     title: s.title,
     learningGoal: s.learningGoal,
+    description: s.description,
+    icon: s.icon,
+    color: s.color,
+    x: s.x,
+    y: s.y,
+    order: s.order,
+    statusType: s.statusType,
+    content: s.content,
     type: s.type,
     prerequisiteStageIds: s.prerequisiteStageIds,
     activityIds: s.activityIds,
     topicTags: s.topicTags,
     checkpoint: {
-      knowledgeQuestionCount: s.checkpoint.knowledgeQuestionCount,
-      codingTaskCount: s.checkpoint.codingTaskCount,
-      knowledgePassPercent: s.checkpoint.knowledgePassPercent,
-      codingPassCount: s.checkpoint.codingPassCount,
+      knowledgeQuestionCount: s.checkpoint?.knowledgeQuestionCount ?? 5,
+      codingTaskCount: s.checkpoint?.codingTaskCount ?? 1,
+      knowledgePassPercent: s.checkpoint?.knowledgePassPercent ?? 70,
+      codingPassCount: s.checkpoint?.codingPassCount ?? 1,
     },
     previewUnlocked: s.previewUnlocked,
   };
@@ -164,6 +176,68 @@ export const studentJourneyController = {
       return;
     }
     res.json({ data: toPublicJourney(journey) });
+  },
+
+  async getJourneyGraph(req: AuthedRequest, res: Response): Promise<void> {
+    const { journeySlug } = req.params;
+    const journey = await journeyStore.findBySlug(journeySlug);
+    if (!journey || journey.status !== 'published') {
+      res.status(404).json({ error: { message: 'Journey not found.' } });
+      return;
+    }
+
+    const stages = await stageStore.listByJourney(journey._id, true);
+    const edges = await journeyEdgeStore.listByJourney(journey._id);
+    const settings = await journeySettingsStore.getByJourney(journey._id);
+
+    res.json({
+      data: {
+        journey: toPublicJourney(journey),
+        stages: stages.map(toPublicStage).filter(Boolean),
+        edges: edges.map((e) => ({
+          id: e._id,
+          journeyId: e.journeyId,
+          fromStageId: e.fromStageId,
+          toStageId: e.toStageId,
+          style: e.style,
+          color: e.color,
+          animated: e.animated,
+        })),
+        settings: {
+          backgroundType: settings.backgroundType,
+          presetId: settings.presetId,
+          gradient: settings.gradient,
+          uploadedImageUrl: settings.uploadedImageUrl,
+          themeColors: settings.themeColors,
+          overlayOpacity: settings.overlayOpacity,
+          updatedAt: settings.updatedAt,
+        },
+      },
+    });
+  },
+
+  async getAsset(req: AuthedRequest, res: Response): Promise<void> {
+    const { assetId } = req.params;
+    try {
+      const db = await getDb();
+      const bucket = new GridFSBucket(db, { bucketName: 'journey_assets' });
+      const _id = new ObjectId(assetId);
+      const files = await bucket.find({ _id }).toArray();
+      if (!files || files.length === 0) {
+        res.status(404).json({ error: { message: 'Asset not found.' } });
+        return;
+      }
+      const file = files[0];
+      const ct = (file.metadata as Record<string, unknown> | undefined)?.['contentType'] as string | undefined;
+      if (ct) {
+        res.setHeader('Content-Type', ct);
+      }
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      const downloadStream = bucket.openDownloadStream(_id);
+      downloadStream.pipe(res);
+    } catch (err) {
+      res.status(404).json({ error: { message: 'Invalid or missing asset.' } });
+    }
   },
 
   // ── Stages for a journey ──────────────────────────────────────────────────

@@ -12,6 +12,10 @@ import type {
   StoredKnowledgeQuestion,
   StoredCheckpointAttempt,
   StoredStudentJourneyProgress,
+  StoredJourneyEdge,
+  StoredJourneySettingsDoc,
+  StoredJourneyVersionSnapshot,
+  JourneySettings,
   StageProgressState,
   ActivityCompletion,
   KnowledgeQuestionStatus,
@@ -68,12 +72,36 @@ async function studentProgressCol() {
   return col;
 }
 
+async function edgesCol() {
+  const db = await getDb();
+  const col = db.collection<StoredJourneyEdge>('journey_edges');
+  await col.createIndex({ journeyId: 1 }).catch(() => {});
+  await col.createIndex({ fromStageId: 1, toStageId: 1 }).catch(() => {});
+  return col;
+}
+
+async function settingsCol() {
+  const db = await getDb();
+  const col = db.collection<StoredJourneySettingsDoc>('journey_settings');
+  await col.createIndex({ journeyId: 1 }, { unique: true }).catch(() => {});
+  return col;
+}
+
+async function snapshotsCol() {
+  const db = await getDb();
+  const col = db.collection<StoredJourneyVersionSnapshot>('journey_snapshots');
+  await col.createIndex({ journeyId: 1, version: -1 }).catch(() => {});
+  return col;
+}
+
 // ─── ID generators ────────────────────────────────────────────────────────────
 
 const uid = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 export const newJourneyId = () => uid('journey');
 export const newStageId = () => uid('stage');
+export const newEdgeId = () => uid('edge');
+export const newSnapshotId = () => uid('snap');
 export const newActivityId = () => uid('act');
 export const newKnowledgeQuestionId = () => uid('kq');
 export const newAttemptId = () => uid('attempt');
@@ -159,6 +187,155 @@ export const stageStore = {
     if (ids.length === 0) return [];
     const col = await stagesCol();
     return col.find({ _id: { $in: ids } }).toArray();
+  },
+
+  async delete(id: string): Promise<boolean> {
+    const col = await stagesCol();
+    const res = await col.deleteOne({ _id: id });
+    return res.deletedCount > 0;
+  },
+
+  async replaceManyForJourney(journeyId: string, stages: StoredStage[]): Promise<void> {
+    const col = await stagesCol();
+    await col.deleteMany({ journeyId });
+    if (stages.length > 0) {
+      await col.insertMany(stages);
+    }
+  },
+};
+
+// ─── Journey Edges store ──────────────────────────────────────────────────────
+
+export const journeyEdgeStore = {
+  async listByJourney(journeyId: string): Promise<StoredJourneyEdge[]> {
+    const col = await edgesCol();
+    return col.find({ journeyId }).toArray();
+  },
+
+  async replaceManyForJourney(journeyId: string, edges: StoredJourneyEdge[]): Promise<void> {
+    const col = await edgesCol();
+    await col.deleteMany({ journeyId });
+    if (edges.length > 0) {
+      await col.insertMany(edges);
+    }
+  },
+
+  async deleteByStageId(journeyId: string, stageId: string): Promise<void> {
+    const col = await edgesCol();
+    await col.deleteMany({
+      journeyId,
+      $or: [{ fromStageId: stageId }, { toStageId: stageId }],
+    });
+  },
+};
+
+// ─── Journey Settings store ───────────────────────────────────────────────────
+
+const DEFAULT_SETTINGS: JourneySettings = {
+  backgroundType: 'gradient',
+  gradient: {
+    from: '#0f172a',
+    to: '#1e1b4b',
+    angle: 135,
+  },
+  themeColors: {
+    primary: '#6542C5',
+    secondary: '#8B5CF6',
+    accent: '#10B981',
+    canvasBg: '#0b0f19',
+  },
+  overlayOpacity: 0.85,
+  updatedBy: 'system',
+  updatedAt: new Date().toISOString(),
+};
+
+export const journeySettingsStore = {
+  async getByJourney(journeyId: string): Promise<JourneySettings> {
+    const col = await settingsCol();
+    const doc = await col.findOne({ journeyId });
+    if (!doc) {
+      return { ...DEFAULT_SETTINGS, updatedAt: new Date().toISOString() };
+    }
+    const { _id, journeyId: jId, ...settings } = doc;
+    return settings;
+  },
+
+  async save(journeyId: string, settings: Partial<JourneySettings>, userId: string): Promise<JourneySettings> {
+    const col = await settingsCol();
+    const current = await this.getByJourney(journeyId);
+    const updated: JourneySettings = {
+      ...current,
+      ...settings,
+      updatedBy: userId,
+      updatedAt: new Date().toISOString(),
+    };
+    await col.updateOne(
+      { journeyId },
+      { $set: { ...updated, journeyId } },
+      { upsert: true },
+    );
+    return updated;
+  },
+};
+
+// ─── Journey Snapshots / Versioning store ──────────────────────────────────────
+
+export const journeySnapshotStore = {
+  async createSnapshot(
+    journeyId: string,
+    stages: StoredStage[],
+    edges: StoredJourneyEdge[],
+    settings: JourneySettings,
+    userId: string,
+    description?: string,
+  ): Promise<StoredJourneyVersionSnapshot> {
+    const col = await snapshotsCol();
+    const latest = await col.findOne({ journeyId }, { sort: { version: -1 } });
+    const nextVersion = (latest?.version ?? 0) + 1;
+    const snap: StoredJourneyVersionSnapshot = {
+      _id: newSnapshotId(),
+      journeyId,
+      version: nextVersion,
+      stages,
+      edges,
+      settings,
+      savedBy: userId,
+      savedAt: new Date().toISOString(),
+      description,
+    };
+    await col.insertOne(snap);
+
+    // Keep only last 10 snapshots per journey
+    const all = await col.find({ journeyId }).sort({ version: -1 }).toArray();
+    if (all.length > 10) {
+      const toRemove = all.slice(10).map((s) => s._id);
+      await col.deleteMany({ _id: { $in: toRemove } });
+    }
+
+    return snap;
+  },
+
+  async listSnapshots(journeyId: string): Promise<{ _id: string; version: number; savedBy: string; savedAt: string; description?: string }[]> {
+    const col = await snapshotsCol();
+    const snaps = await col
+      .find({ journeyId }, { projection: { _id: 1, version: 1, savedBy: 1, savedAt: 1, description: 1 } })
+      .sort({ version: -1 })
+      .toArray();
+    return snaps.map((s) => ({
+      _id: s._id,
+      version: s.version,
+      savedBy: s.savedBy,
+      savedAt: s.savedAt,
+      description: s.description,
+    }));
+  },
+
+  async getSnapshot(journeyId: string, versionIdOrNumber: string | number): Promise<StoredJourneyVersionSnapshot | null> {
+    const col = await snapshotsCol();
+    if (typeof versionIdOrNumber === 'number') {
+      return col.findOne({ journeyId, version: versionIdOrNumber });
+    }
+    return col.findOne({ journeyId, _id: versionIdOrNumber });
   },
 };
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * LearningJourney.tsx
  *
  * The main learning journey page. Lazy-loads the React Flow canvas so it does
@@ -29,11 +29,14 @@ import {
   Code,
   Brain,
   Target,
+  Edit,
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { journeyService } from '@/services/journeyService';
+import { useAuth } from '@/store/AuthContext';
+import { getSocket } from '@/services/socket';
 import type { Journey, Stage, StudentJourneyProgress, StageProgressState } from '@/types/journey';
 
 // Lazy-load the canvas so login/dashboard aren't blocked
@@ -395,6 +398,7 @@ export function LearningJourney() {
   const [view, setView] = useState<'map' | 'list'>('map');
   const [selectedStage, setSelectedStage] = useState<Stage | null>(null);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   // For now, load the first published journey
   // TODO: journey picker if multiple journeys are published
@@ -440,6 +444,22 @@ export function LearningJourney() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // Real-time update: when admin saves, refresh
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const handler = (_data: { journeyId: string }) => { load(); };
+    socket.on('journey:updated', handler);
+    return () => { socket.off('journey:updated', handler); };
+  }, [load]);
+
+  // Also refetch when tab regains focus
+  useEffect(() => {
+    const handler = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
   }, [load]);
 
   // Find current stage (first non-passed, non-locked)
@@ -559,6 +579,18 @@ export function LearningJourney() {
 
           {/* View toggle & Code Comprehension link */}
           <div className="flex items-center gap-2">
+            {/* Admin: Edit Journey button */}
+            {user?.role === 'admin' && journey && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => navigate(`/app/journey-editor/${(journey as unknown as { _id: string })._id ?? journey.id}`)}
+                className="hidden sm:inline-flex border-[#6542C5]/50 text-[#6542C5] hover:bg-[#6542C5]/10"
+              >
+                <Edit size={13} />
+                Edit Journey
+              </Button>
+            )}
             <Link to="/app/comprehension">
               <Button size="sm" variant="outline" className="hidden sm:inline-flex">
                 <Brain size={15} />

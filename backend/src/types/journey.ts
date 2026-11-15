@@ -62,6 +62,21 @@ export interface StoredStage {
   slug: string;
   title: string;
   learningGoal: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  x?: number;
+  y?: number;
+  order?: number;
+  statusType?: 'concept' | 'practice' | 'milestone' | 'project' | 'review';
+  content?: {
+    topics?: string[];
+    resources?: { title: string; url: string; type?: string }[];
+    linkedQuizId?: string;
+    linkedCodingProblemId?: string;
+    linkedPlannerItemId?: string;
+    estimatedTimeMinutes?: number;
+  };
   /** Stage type — controls checkpoint blueprint defaults */
   type: StageType;
   /**
@@ -82,6 +97,58 @@ export interface StoredStage {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// ─── Journey Edges, Settings, History ──────────────────────────────────────────
+
+export interface StoredJourneyEdge {
+  _id: string; // "edge_..."
+  journeyId: string;
+  fromStageId: string;
+  toStageId: string;
+  style: 'curve' | 'straight' | 'dashed';
+  color?: string;
+  animated?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JourneySettings {
+  backgroundType: 'preset' | 'gradient' | 'uploaded';
+  presetId?: string;
+  gradient?: {
+    from: string;
+    to: string;
+    angle?: number;
+  };
+  uploadedImageId?: string;
+  uploadedImageUrl?: string;
+  themeColors?: {
+    primary?: string;
+    secondary?: string;
+    accent?: string;
+    canvasBg?: string;
+  };
+  overlayOpacity: number; // 0 to 1
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export interface StoredJourneySettingsDoc extends JourneySettings {
+  _id: string; // "settings_..." or journeyId
+  journeyId: string;
+}
+
+export interface StoredJourneyVersionSnapshot {
+  _id: string; // "ver_..."
+  journeyId: string;
+  version: number;
+  stages: StoredStage[];
+  edges: StoredJourneyEdge[];
+  settings: JourneySettings;
+  savedBy: string;
+  savedAt: string;
+  description?: string;
 }
 
 // ─── Activity ─────────────────────────────────────────────────────────────────
@@ -336,6 +403,21 @@ export interface PublicStage {
   slug: string;
   title: string;
   learningGoal: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  x?: number;
+  y?: number;
+  order?: number;
+  statusType?: 'concept' | 'practice' | 'milestone' | 'project' | 'review';
+  content?: {
+    topics?: string[];
+    resources?: { title: string; url: string; type?: string }[];
+    linkedQuizId?: string;
+    linkedCodingProblemId?: string;
+    linkedPlannerItemId?: string;
+    estimatedTimeMinutes?: number;
+  };
   type: StageType;
   prerequisiteStageIds: string[];
   activityIds: string[];
@@ -347,6 +429,42 @@ export interface PublicStage {
     codingPassCount: number;
   };
   previewUnlocked: boolean;
+}
+
+export interface PublicJourneyEdge {
+  id: string;
+  journeyId: string;
+  fromStageId: string;
+  toStageId: string;
+  style: 'curve' | 'straight' | 'dashed';
+  color?: string;
+  animated?: boolean;
+}
+
+export interface PublicJourneySettings {
+  backgroundType: 'preset' | 'gradient' | 'uploaded';
+  presetId?: string;
+  gradient?: {
+    from: string;
+    to: string;
+    angle?: number;
+  };
+  uploadedImageUrl?: string;
+  themeColors?: {
+    primary?: string;
+    secondary?: string;
+    accent?: string;
+    canvasBg?: string;
+  };
+  overlayOpacity: number;
+  updatedAt?: string;
+}
+
+export interface PublicJourneyGraph {
+  journey: PublicJourney;
+  stages: PublicStage[];
+  edges: PublicJourneyEdge[];
+  settings: PublicJourneySettings;
 }
 
 export interface PublicActivity {
