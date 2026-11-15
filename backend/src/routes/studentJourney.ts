@@ -8,6 +8,8 @@ studentJourneyRouter.use(requireAuth);
 // Journey listing and detail
 studentJourneyRouter.get('/journeys', sc.listJourneys);
 studentJourneyRouter.get('/journeys/:journeySlug', sc.getJourney);
+studentJourneyRouter.get('/journeys/:journeySlug/graph', sc.getJourneyGraph);
+studentJourneyRouter.get('/assets/:assetId', sc.getAsset);
 
 // Progress for a journey
 studentJourneyRouter.get('/journeys/:journeySlug/progress', sc.getProgress);

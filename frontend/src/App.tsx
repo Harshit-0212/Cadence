@@ -42,6 +42,7 @@ const Leaderboard = lazy(() => import('@/pages/Leaderboard').then((m) => ({ defa
 const CalendarPage = lazy(() => import('@/pages/CalendarPage').then((m) => ({ default: m.CalendarPage })));
 const DocumentLibrary = lazy(() => import('@/pages/DocumentLibrary').then((m) => ({ default: m.DocumentLibrary })));
 const InterviewPrep = lazy(() => import('@/pages/InterviewPrep').then((m) => ({ default: m.InterviewPrep })));
+const JourneyEditorCanvas = lazy(() => import('@/pages/JourneyEditorCanvas').then((m) => ({ default: m.JourneyEditorCanvas })));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isInitializing } = useAuth();
@@ -379,6 +380,14 @@ function AppRoutes() {
             element={
               <AdminRoute>
                 <AdminCodingStudio />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/app/journey-editor/:journeyId"
+            element={
+              <AdminRoute>
+                <JourneyEditorCanvas />
               </AdminRoute>
             }
           />

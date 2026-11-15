@@ -14,15 +14,27 @@
  * document was never written) before re-seeding.
  */
 import { getDb } from './db.js';
-import { journeyStore, stageStore, activityStore, knowledgeQuestionStore, newJourneyId, newStageId, newActivityId, newKnowledgeQuestionId } from '../lib/journeyStore.js';
+import {
+  journeyStore,
+  stageStore,
+  activityStore,
+  knowledgeQuestionStore,
+  journeyEdgeStore,
+  journeySettingsStore,
+  newJourneyId,
+  newStageId,
+  newEdgeId,
+  newActivityId,
+  newKnowledgeQuestionId,
+} from '../lib/journeyStore.js';
 import { codingProblemStore } from '../lib/codingStore.js';
 
 const STAGE_SLUGS = [
   'arrays-access-traversal',
-  'arrays-adjacent-compare',
-  'arrays-count-conditions',
+  'arrays-adjacent-elements',
+  'arrays-counting-conditions',
   'arrays-boundary-cases',
-  'arrays-milestone-checkpoint',
+  'arrays-comprehensive-checkpoint',
 ];
 
 /**
@@ -50,9 +62,12 @@ async function cleanupOrphanedSeedData(): Promise<void> {
   await stagesCol.deleteMany({ _id: { $in: orphanIds } });
   if (orphanJourneyIds.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const col = db.collection<any>;
+    const col = (name: string) => db.collection<any>(name);
     await col('journey_activities').deleteMany({ journeyId: { $in: orphanJourneyIds } });
     await col('journey_knowledge_questions').deleteMany({ journeyId: { $in: orphanJourneyIds } });
+    await col('journey_edges').deleteMany({ journeyId: { $in: orphanJourneyIds } });
+    await col('journey_settings').deleteMany({ journeyId: { $in: orphanJourneyIds } });
+    await col('journey_snapshots').deleteMany({ journeyId: { $in: orphanJourneyIds } });
     await col('journey_journeys').deleteMany({ _id: { $in: orphanJourneyIds } });
   }
   console.log('[journey-seed] Orphaned records removed; proceeding with fresh seed.');
@@ -176,13 +191,28 @@ export async function seedArraysJourneyIfMissing(): Promise<void> {
     },
   ];
 
-  for (const s of stagesData) {
+  for (let i = 0; i < stagesData.length; i++) {
+    const s = stagesData[i];
     await stageStore.create({
       _id: s.id,
       journeyId,
       slug: s.slug,
       title: s.title,
       learningGoal: s.learningGoal,
+      description: s.learningGoal,
+      icon: i === 4 ? 'award' : i === 0 ? 'database' : i === 1 ? 'git-commit' : i === 2 ? 'calculator' : 'shield-alert',
+      color: i === 0 ? '#6542C5' : i === 1 ? '#3B82F6' : i === 2 ? '#10B981' : i === 3 ? '#F59E0B' : '#EC4899',
+      x: 100 + i * 280,
+      y: 180 + (i % 2 === 1 ? -40 : 40),
+      order: i + 1,
+      statusType: (i === 4 ? 'milestone' : i === 0 ? 'concept' : 'practice') as any,
+      content: {
+        topics: s.topicTags,
+        resources: [
+          { title: `${s.title} Reference Guide`, url: 'https://cadence.internal/resources' }
+        ],
+        estimatedTimeMinutes: 20 + i * 5,
+      },
       type: s.type,
       prerequisiteStageIds: s.prerequisites,
       activityIds: [],
@@ -535,6 +565,76 @@ int main() {
     createdAt: now,
     updatedAt: now,
   });
+
+  // Seed default journey edges connecting stages sequentially
+  const defaultEdges = [
+    {
+      _id: newEdgeId(),
+      journeyId,
+      fromStageId: stage1Id,
+      toStageId: stage2Id,
+      style: 'curve' as const,
+      color: '#6542C5',
+      animated: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: newEdgeId(),
+      journeyId,
+      fromStageId: stage2Id,
+      toStageId: stage3Id,
+      style: 'curve' as const,
+      color: '#3B82F6',
+      animated: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: newEdgeId(),
+      journeyId,
+      fromStageId: stage3Id,
+      toStageId: stage4Id,
+      style: 'curve' as const,
+      color: '#10B981',
+      animated: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: newEdgeId(),
+      journeyId,
+      fromStageId: stage4Id,
+      toStageId: milestoneStageId,
+      style: 'dashed' as const,
+      color: '#F59E0B',
+      animated: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+  await journeyEdgeStore.replaceManyForJourney(journeyId, defaultEdges);
+
+  // Seed default journey settings
+  await journeySettingsStore.save(
+    journeyId,
+    {
+      backgroundType: 'gradient',
+      gradient: {
+        from: '#0f172a',
+        to: '#1e1b4b',
+        angle: 135,
+      },
+      themeColors: {
+        primary: '#6542C5',
+        secondary: '#8B5CF6',
+        accent: '#10B981',
+        canvasBg: '#0b0f19',
+      },
+      overlayOpacity: 0.85,
+    },
+    'system',
+  );
 
   console.log('[journey-seed] Arrays Fundamentals journey seeded successfully.');
 }

@@ -39,3 +39,7 @@ export function emitToUser(userId: string, event: string, payload: unknown): voi
 export function emitToUsers(userIds: string[], event: string, payload: unknown): void {
   for (const id of userIds) emitToUser(id, event, payload);
 }
+
+export function broadcastEvent(event: string, payload: unknown): void {
+  io?.emit(event, payload);
+}
